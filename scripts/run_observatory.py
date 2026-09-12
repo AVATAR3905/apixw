@@ -312,10 +312,13 @@ def main():
         seed_if_needed(reset=args.reset)
 
     if not args.no_collect:
-        if args.full:
-            run_full_collection(use_vlm=args.use_vlm)
-        else:
-            run_focused_collection(use_vlm=args.use_vlm)
+        try:
+            if args.full:
+                run_full_collection(use_vlm=args.use_vlm)
+            else:
+                run_focused_collection(use_vlm=args.use_vlm)
+        except Exception as e:
+            print(f"\n[!] Live collection failed ({e}). Continuing to accuracy warm-up + servers.")
     else:
         print("[3/4] Collection: SKIPPED (--no-collect)")
 

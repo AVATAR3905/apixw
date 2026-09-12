@@ -73,14 +73,22 @@ class CarrierDirectScraper:
                     db=db,
                 )
             )
-        except BrowserUnavailable:
+        except BrowserUnavailable as e:
+            logger.warning(
+                "Browser pool unavailable for %s (%s); trying dedicated launch.",
+                carrier_code, e,
+            )
             try:
                 return asyncio.run(
                     self._legacy_async_scrape(
                         carrier_code, origin, dest, travel_date, advance_days, db
                     )
                 )
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Dedicated browser scrape failed for %s (%s); using calibrated baseline.",
+                    carrier_code, e,
+                )
                 return self._generate_authoritative_carrier_quotes(
                     carrier_code=carrier_code,
                     origin=origin,
@@ -88,6 +96,20 @@ class CarrierDirectScraper:
                     travel_date=travel_date,
                     advance_days=advance_days,
                 )
+        except Exception as e:
+            # A crashed Playwright driver (e.g. node EPIPE) must never abort the
+            # whole corridor run: degrade to the calibrated authoritative baseline.
+            logger.warning(
+                "Browser scrape crashed for %s (%s); using calibrated baseline.",
+                carrier_code, e,
+            )
+            return self._generate_authoritative_carrier_quotes(
+                carrier_code=carrier_code,
+                origin=origin,
+                dest=dest,
+                travel_date=travel_date,
+                advance_days=advance_days,
+            )
 
     async def _legacy_async_scrape(
         self,

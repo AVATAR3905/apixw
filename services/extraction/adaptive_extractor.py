@@ -15,6 +15,7 @@ number, departure/arrival times, stops and duration.
 
 import datetime
 import logging
+import os
 import re
 from typing import Any, Dict, List, NamedTuple, Optional
 
@@ -148,6 +149,14 @@ def extract_date_fields(text: str, reference_date: Optional[str | datetime.date]
     return fields
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    """Read a live env override (set at runtime) ahead of the settings singleton."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class AdaptiveExtractor:
     """Runs the extraction chain and reports the strongest method used."""
 
@@ -161,11 +170,16 @@ class AdaptiveExtractor:
     ):
         from packages.shared.config import settings
 
+        if allow_vlm is None:
+            allow_vlm = _env_flag("EXTRACTION_ALLOW_VLM", settings.EXTRACTION_ALLOW_VLM)
+        if allow_ocr is None:
+            allow_ocr = _env_flag("EXTRACTION_ALLOW_OCR", settings.EXTRACTION_ALLOW_OCR)
+
         self.ocr = ocr or OCRService()
         self.vlm = vlm or VLMService()
         self.layout = layout or LayoutClusterer()
-        self.allow_vlm = settings.EXTRACTION_ALLOW_VLM if allow_vlm is None else allow_vlm
-        self.allow_ocr = settings.EXTRACTION_ALLOW_OCR if allow_ocr is None else allow_ocr
+        self.allow_vlm = allow_vlm
+        self.allow_ocr = allow_ocr
 
     @staticmethod
     def _parse_price(text: str) -> Optional[float]:
