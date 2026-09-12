@@ -156,12 +156,16 @@ class AdaptiveExtractor:
         ocr: Optional[OCRService] = None,
         vlm: Optional[VLMService] = None,
         layout: Optional[LayoutClusterer] = None,
-        allow_vlm: bool = True,
+        allow_vlm: Optional[bool] = None,
+        allow_ocr: Optional[bool] = None,
     ):
+        from packages.shared.config import settings
+
         self.ocr = ocr or OCRService()
         self.vlm = vlm or VLMService()
         self.layout = layout or LayoutClusterer()
-        self.allow_vlm = allow_vlm
+        self.allow_vlm = settings.EXTRACTION_ALLOW_VLM if allow_vlm is None else allow_vlm
+        self.allow_ocr = settings.EXTRACTION_ALLOW_OCR if allow_ocr is None else allow_ocr
 
     @staticmethod
     def _parse_price(text: str) -> Optional[float]:
@@ -235,13 +239,15 @@ class AdaptiveExtractor:
 
         # 2. OCR geometry
         ocr_fields: Dict[str, Any] = {}
-        if context.image_path:
+        if context.image_path and self.allow_ocr:
             chain.append("OCR")
             try:
                 tokens = self.ocr.extract(context.image_path)
                 ocr_fields = self.fields_from_tokens(tokens, ref)
             except ExtractionNotAvailable:
                 chain.append("OCR_SKIPPED")
+        elif not self.allow_ocr:
+            chain.append("OCR_SKIPPED")
 
         # 3. VLM fallback for missing fields
         vlm_used = False

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     BASE_PERIOD: str = "2026-08-01"
     MINIMUM_COVERAGE_RATE: float = 80.0
 
+    # Extraction stage control (OCR / VLM escalation)
+    EXTRACTION_ALLOW_VLM: bool = True
+    EXTRACTION_ALLOW_OCR: bool = True
+
     # Quality Engine Thresholds
     QUALITY_MINIMUM_ACCEPT_SCORE: int = 70
     QUALITY_MINIMUM_PLAUSIBLE_PRICE: float = 1200.0

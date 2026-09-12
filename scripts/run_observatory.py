@@ -126,8 +126,11 @@ def seed_if_needed(reset: bool = False):
 # Step 2: Collection
 # ---------------------------------------------------------------------------
 
-def run_focused_collection():
+def run_focused_collection(use_vlm: bool = False):
     """Run a single-corridor live collection (DEL-BOM T+15)."""
+    if not use_vlm:
+        os.environ["EXTRACTION_ALLOW_VLM"] = "false"
+        print("      (VLM stage disabled for the demo — DOM/OCR, fall back to calibrated model; use --use-vlm to enable)")
     from services.collectors.dual_feed_runner import run_dual_feed_collection
     print("\n[3/4] Running live collection: DEL-BOM T+15 (carrier-direct + RPC)...")
     reconciliation = run_dual_feed_collection(
@@ -140,8 +143,11 @@ def run_focused_collection():
     return reconciliation
 
 
-def run_full_collection():
+def run_full_collection(use_vlm: bool = False):
     """Run production collection across all 10 corridors x 5 horizons."""
+    if not use_vlm:
+        os.environ["EXTRACTION_ALLOW_VLM"] = "false"
+        print("      (VLM stage disabled for the demo — DOM/OCR, fall back to calibrated model; use --use-vlm to enable)")
     from services.collectors.production_collector import run_production_collection
     print("\n[3/4] Running full production collection (10 corridors x 5 horizons)...")
     summary = run_production_collection(delay_seconds=0.5)
@@ -282,6 +288,7 @@ def parse_args():
     parser.add_argument("--no-seed",     action="store_true", help="Skip database seeding entirely")
     parser.add_argument("--no-collect",  action="store_true", help="Skip live collection (seed-only run)")
     parser.add_argument("--full",        action="store_true", help="Run full 10-route x 5-horizon collection")
+    parser.add_argument("--use-vlm",     action="store_true", help="Enable the heavy 0.9B VLM extraction stage (default: off for speed)")
     parser.add_argument("--no-warm",     action="store_true", help="Skip forecast accuracy warm-up snapshots")
     parser.add_argument("--no-servers",  action="store_true", help="Run pipeline only, don't start API/dashboard")
     parser.add_argument("--api-port",    type=int, default=8000, help="FastAPI port (default 8000)")
@@ -306,9 +313,9 @@ def main():
 
     if not args.no_collect:
         if args.full:
-            run_full_collection()
+            run_full_collection(use_vlm=args.use_vlm)
         else:
-            run_focused_collection()
+            run_focused_collection(use_vlm=args.use_vlm)
     else:
         print("[3/4] Collection: SKIPPED (--no-collect)")
 
