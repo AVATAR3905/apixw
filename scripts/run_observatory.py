@@ -31,6 +31,42 @@ sys.path.insert(0, PROJECT_ROOT)
 
 DASHBOARD_DIR = os.path.join(PROJECT_ROOT, "apps", "dashboard")
 
+# Core runtime dependencies checked before any app import (a bare Python build
+# without the project's requirements will otherwise die with a raw traceback).
+CRITICAL_DEPS = [
+    ("sqlalchemy", "pip install sqlalchemy"),
+    ("fastapi", "pip install fastapi"),
+    ("uvicorn", "pip install uvicorn[standard]"),
+    ("pydantic", "pip install pydantic"),
+    ("pandas", "pip install pandas"),
+]
+
+
+def _check_dependencies() -> None:
+    """Fail fast with actionable guidance if required packages are missing."""
+    missing = [label for label, _ in CRITICAL_DEPS if not _importable(label)]
+    if not missing:
+        return
+
+    print("\n[ERROR] Missing required Python packages: " + ", ".join(missing))
+    print("  The current interpreter is: " + sys.executable)
+    print("  Fix one of:\n")
+    print("  1) Use the Anaconda base env (already has all dependencies):")
+    print("        C:\\Users\\cecilia\\anaconda3\\python.exe scripts/run_observatory.py")
+    print("  2) Install the project requirements into this environment:")
+    print("        python -m pip install -r requirements.txt")
+    print("\n  The seeded database (airfare_observatory.db) already exists in this")
+    print("  folder, so no data setup is needed once the right interpreter is used.\n")
+    sys.exit(1)
+
+
+def _importable(module: str) -> bool:
+    try:
+        __import__(module)
+        return True
+    except ImportError:
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -257,6 +293,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    _check_dependencies()
 
     # Handle Ctrl+C gracefully from the start
     signal.signal(signal.SIGINT, lambda *_: None)
