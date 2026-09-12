@@ -242,13 +242,20 @@ class AdaptiveExtractor:
         texts = [t.text for t in tokens]
         return cls.fields_from_dom(texts, reference_date)
 
-    def extract(self, context: ExtractionContext) -> ExtractionResult:
+    def extract(self, context: ExtractionContext, force_vlm: bool = False) -> ExtractionResult:
+        """Run the extraction chain.
+
+        ``force_vlm`` (used by the OCR+VLM demo pipeline) runs the VLM stage on
+        every image even when OCR already resolved price + route, so both stages
+        demonstrably contribute to the record and ``extraction_method`` reports
+        "VLM" as the strongest stage used.
+        """
         chain: List[str] = []
         ref = context.reference_date
 
         # 1. DOM state
         dom_fields = self.fields_from_dom(context.dom_text or [], ref)
-        if dom_fields.get("price") is not None:
+        if dom_fields.get("price") is not None and not force_vlm:
             return ExtractionResult(dom_fields, "DOM_BROWSER", 0.95, ["DOM"])
 
         # 2. OCR geometry
@@ -263,12 +270,12 @@ class AdaptiveExtractor:
         elif not self.allow_ocr:
             chain.append("OCR_SKIPPED")
 
-        # 3. VLM fallback for missing fields
+        # 3. VLM fallback for missing fields (always when force_vlm=True)
         vlm_used = False
         if (
             self.allow_vlm
             and context.image_path
-            and (not ocr_fields.get("price") or not ocr_fields.get("origin"))
+            and (force_vlm or not ocr_fields.get("price") or not ocr_fields.get("origin"))
         ):
             chain.append("VLM")
             try:
@@ -300,7 +307,7 @@ class AdaptiveExtractor:
         if not fields:
             return ExtractionResult({}, "NONE", 0.0, chain)
         method = "OCR" if context.image_path else "DOM_BROWSER"
-        if vlm_used and not fields.get("origin"):
+        if vlm_used and (force_vlm or not fields.get("origin")):
             method = "VLM"
         confidence = METHOD_WEIGHTS.get(method.upper(), 0.5)
         return ExtractionResult(fields, method, confidence, chain)

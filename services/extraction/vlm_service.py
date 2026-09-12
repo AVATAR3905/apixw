@@ -51,8 +51,13 @@ def _walk_strings(obj: Any) -> List[str]:
 class _PaddleOCRVLBackend:
     """Local PaddleOCR-VL-1.6 (0.9B) card-field extractor."""
 
+    # The 0.9B pipeline is expensive to instantiate (~4 min CPU) and MUST be
+    # shared across calls; constructing one backend per extraction would reload
+    # weights on every image. Cached at module level so the model loads once.
+    _shared_pipeline: Optional[Any] = None
+
     def __init__(self):
-        self._pipeline: Optional[Any] = None
+        pass
 
     @staticmethod
     def _parse_fields(text: str) -> Dict[str, Any]:
@@ -81,11 +86,11 @@ class _PaddleOCRVLBackend:
         return fields
 
     def _text_of(self, image_path: str) -> str:
-        if self._pipeline is None:
+        if _PaddleOCRVLBackend._shared_pipeline is None:
             from paddleocr import PaddleOCRVL
 
-            self._pipeline = PaddleOCRVL(pipeline_version="v1.6")
-        results = self._pipeline.predict(image_path)
+            _PaddleOCRVLBackend._shared_pipeline = PaddleOCRVL(pipeline_version="v1.6")
+        results = _PaddleOCRVLBackend._shared_pipeline.predict(image_path)
         blob: List[str] = []
         for result in results or []:
             res = (result.json or {}).get("res") if hasattr(result, "json") else {}
