@@ -67,13 +67,17 @@ class BrowserPool:
         if not ready.wait(timeout=5.0):
             raise BrowserUnavailable("Browser pool thread failed to start.")
 
-    def submit(self, coro: Coroutine) -> Any:
+    def submit(self, coro: Coroutine, timeout: float = 60.0) -> Any:
         """Run a coroutine on the pool's loop and block for its result."""
         self.start()
         with self._lock:
             loop = self._loop
         future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result()
+        try:
+            return future.result(timeout=timeout)
+        except TimeoutError:
+            future.cancel()
+            raise BrowserUnavailable(f"Browser operation timed out after {timeout}s")
 
     def stop(self, wait: float = 2.0) -> None:
         with self._lock:

@@ -20,6 +20,17 @@ from services.collectors.real_fare_normalizer import RealFareNormalizer
 from services.collectors.real_flight_connector import RealFlightRPCConnector
 
 
+def carrier_display_name(code: str) -> str:
+    mapping = {
+        "6E": "IndiGo",
+        "AI": "Air India",
+        "SG": "SpiceJet",
+        "QP": "Akasa Air",
+        "IX": "Air India Express",
+    }
+    return mapping.get(code.upper(), code.upper())
+
+
 def run_dual_feed_collection(
     route_code: str = "DEL-BOM",
     advance_days: int = 7,
@@ -58,6 +69,7 @@ def run_dual_feed_collection(
 
         # Query top domestic carriers operating on corridor
         for c_code in ["6E", "SG", "QP"]:
+            print(f"      -> Querying {carrier_display_name(c_code)} booking portal...")
             c_res = direct_scraper.scrape_carrier_corridor(
                 carrier_code=c_code,
                 origin_airport=origin,
@@ -65,6 +77,9 @@ def run_dual_feed_collection(
                 advance_days=advance_days,
                 search_date=search_date,
                 db=db,
+            )
+            print(
+                f"      -> {carrier_display_name(c_code)} returned {len(c_res)} quote(s)."
             )
             carrier_quotes.extend(c_res)
 
