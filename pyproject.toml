@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airfare-price-observatory"
+version = "0.1.0"
+description = "High-Frequency Real-Time Airfare Price Index & Observatory for India (MoSPI / NSO)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Airfare Observatory Engineering Team" }
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "sqlalchemy>=2.0.30",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.9",
+    "asyncpg>=0.29.0",
+    "pandas>=2.2.0",
+    "polars>=1.6.0",
+    "numpy>=1.26.0",
+    "scipy>=1.14.0",
+    "statsmodels>=0.14.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "playwright>=1.46.0",
+    "fast_flights>=3.1.0",
+    "apscheduler>=3.10.4",
+    "python-dotenv>=1.0.1",
+    "redis>=5.0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+    "black>=24.8.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "services*", "packages*", "database*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"

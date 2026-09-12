@@ -1,0 +1,44 @@
+{
+  "protocol": 60,
+  "session": ["en", "FjA9QVEJBHhEIQhnZAE="],
+  "batch": [
+    [null, null, 60],
+    [
+      null,
+      [
+        [
+          {
+            "origin_airport": "DEL",
+            "destination_airport": "BOM",
+            "travel_date": "2026-09-18",
+            "flight_number": "6E-205",
+            "total_fare": 3540.0,
+            "carrier_code": "6E",
+            "carrier_name": "IndiGo",
+            "departure_time": "06:00"
+          },
+          {
+            "origin_airport": "DEL",
+            "destination_airport": "BOM",
+            "travel_date": "2026-09-18",
+            "flight_number": "6E-532",
+            "total_fare": 3717.0,
+            "carrier_code": "6E",
+            "carrier_name": "IndiGo",
+            "departure_time": "09:30"
+          },
+          {
+            "origin_airport": "DEL",
+            "destination_airport": "BOM",
+            "travel_date": "2026-09-18",
+            "flight_number": "AI-806",
+            "total_fare": 4102.0,
+            "carrier_code": "AI",
+            "carrier_name": "Air India",
+            "departure_time": "11:00"
+          }
+        ]
+      ]
+    ]
+  ]
+}

@@ -1,0 +1,21 @@
+period,origin_airport,destination_airport,passenger_volume,carrier_count,source_publication
+2025-Q4,DEL,BOM,1650000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BOM,DEL,1600000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,BLR,1270000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BLR,DEL,1240000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BOM,BLR,1080000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BLR,BOM,1060000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,CCU,930000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,CCU,DEL,920000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,HYD,870000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,HYD,DEL,860000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BOM,MAA,770000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,MAA,BOM,750000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,BLR,HYD,700000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,HYD,BLR,690000,5,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,MAA,670000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,MAA,DEL,650000,4,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,IXS,520000,2,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,IXS,DEL,500000,2,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DEL,DHM,470000,2,DGCA Monthly Domestic Passenger Traffic Report
+2025-Q4,DHM,DEL,450000,2,DGCA Monthly Domestic Passenger Traffic Report

@@ -1,0 +1,275 @@
+# APIX-2.0 Production Configuration
+
+# Database
+database:
+  url: "sqlite:///airfare_observatory.db"
+  pool_size: 20
+  max_overflow: 10
+  pool_timeout: 30
+  pool_recycle: 3600
+
+# API Server
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  timeout: 60
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
+  rate_limit:
+    requests_per_minute: 100
+    requests_per_hour: 5000
+
+# Dashboard
+dashboard:
+  host: "0.0.0.0"
+  port: 3000
+  build_command: "npm run build"
+  start_command: "npm run start"
+
+# Scheduler
+scheduler:
+  enabled: true
+  collection_cron: "0 18 * * *"  # Daily at 18:00 IST
+  index_recompute_cron: "0 6 * * *"  # Daily at 06:00 IST
+  cleanup_cron: "0 3 * * 0"  # Weekly on Sunday 03:00
+  timezone: "Asia/Kolkata"
+
+# Data Collection
+collection:
+  # Carrier Direct (NDC + Browser)
+  carrier_direct:
+    enabled: true
+    carriers:
+      - code: "6E"
+        name: "IndiGo"
+        ndc_endpoint: "https://api.goindigo.in/ndc/v21.3"
+        api_key_env: "INDIGO_NDC_API_KEY"
+        rate_limit_rpm: 30
+      - code: "AI"
+        name: "Air India"
+        ndc_endpoint: "https://api.airindia.com/ndc/v21.3"
+        api_key_env: "AIRINDIA_NDC_API_KEY"
+        rate_limit_rpm: 30
+      - code: "SG"
+        name: "SpiceJet"
+        ndc_endpoint: null
+        rate_limit_rpm: 20
+      - code: "QP"
+        name: "Akasa Air"
+        ndc_endpoint: null
+        rate_limit_rpm: 20
+    advance_days: [1, 7, 14, 15, 30, 45]
+    routes: ["DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "DEL-HYD", "BOM-MAA", "BLR-HYD", "DEL-MAA", "DEL-IXS", "DEL-DHM"]
+    browser_pool_size: 4
+    headless: true
+
+  # OTA Scrapers
+  ota:
+    enabled: true
+    scrapers:
+      - name: "MakeMyTrip India"
+        domain: "makemytrip.com"
+        source_id: 7
+        convenience_fee: 420.0
+        rate_limit_rpm: 10
+      - name: "Ixigo Flights"
+        domain: "ixigo.com"
+        source_id: 8
+        convenience_fee: 360.0
+        rate_limit_rpm: 10
+      - name: "EaseMyTrip"
+        domain: "easemytrip.com"
+        source_id: 9
+        convenience_fee: 349.0
+        rate_limit_rpm: 10
+      - name: "Yatra Online"
+        domain: "yatra.com"
+        source_id: 10
+        convenience_fee: 399.0
+        rate_limit_rpm: 10
+      - name: "Cleartrip"
+        domain: "cleartrip.com"
+        source_id: 11
+        convenience_fee: 349.0
+        rate_limit_rpm: 10
+      - name: "Skyscanner India"
+        domain: "skyscanner.co.in"
+        source_id: 12
+        convenience_fee: 0.0
+        rate_limit_rpm: 5
+    advance_days: [1, 7, 14, 15, 30, 45]
+    routes: ["DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "DEL-HYD", "BOM-MAA", "BLR-HYD", "DEL-MAA", "DEL-IXS", "DEL-DHM"]
+    headless: true
+
+  # Ethical Scraping
+  ethical_scraping:
+    robots_txt_compliance: true
+    rate_limit:
+      requests_per_minute: 30
+      requests_per_hour: 500
+      concurrent_requests: 3
+      min_delay_seconds: 1.0
+      max_delay_seconds: 5.0
+      backoff_multiplier: 2.0
+    proxy:
+      enabled: false
+      proxy_urls: []
+      rotate_on_failure: true
+      rotate_on_captcha: true
+      max_failures_per_proxy: 3
+    captcha:
+      enabled: false
+      solver_api_key_env: "TWOCAPTCHA_API_KEY"
+      solver_endpoint: "https://api.2captcha.com"
+      max_retries: 3
+      timeout_seconds: 120
+    user_agent: "APIX-Research-Bot/1.0 (+https://apix.example.com/bot)"
+    respect_crawl_delay: true
+    max_concurrent_domains: 3
+
+# Index Calculation
+index:
+  base_date: "2026-08-01"
+  base_value: 100.0
+  methodology_version: "APIX-2.0"
+  weight_version: "DGCA_2026_V1"
+  horizons: [1, 7, 15, 30, 45]
+  headline_horizon: 15
+  price_series: ["BASE_FARE", "TOTAL_FARE"]
+  min_coverage_pct: 80.0
+  min_routes_for_live: 8
+  moving_avg_window: 28
+  spot_window_days: 28
+  quality_thresholds:
+    experimental_to_beta_coverage: 80.0
+    beta_to_live_coverage: 90.0
+    min_routes_for_live: 8
+    min_carriers_per_route: 2
+
+# Forecasting
+forecasting:
+  enabled: true
+  timesfm:
+    enabled: true
+    model: "timesfm-2.5-500m-jax"
+    endpoint: "http://localhost:3030"
+    weight: 0.50
+    timeout: 30
+  lightgbm:
+    enabled: true
+    model_path: "models/forecast"
+    weight: 0.35
+    conformal_alpha: 0.1
+  statistical:
+    enabled: true
+    method: "stl_arima"
+    weight: 0.15
+  ensemble:
+    default_horizon: 28
+    max_horizon: 28
+    confidence_threshold: 0.5
+  model_training:
+    retrain_cron: "0 2 * * 0"  # Weekly Sunday 02:00
+    min_training_samples: 50
+    validation_split_days: 28
+    calibration_alpha: 0.1
+
+# Caching
+cache:
+  redis:
+    enabled: false
+    url: "redis://localhost:6379/0"
+    default_ttl: 300
+  memory:
+    enabled: true
+    max_size: 10000
+  ttl:
+    index: 900
+    index_timeseries: 900
+    corridor_list: 600
+    corridor_detail: 600
+    live_quotes: 120
+    analytics: 1800
+    export: 3600
+
+# Monitoring & Logging
+monitoring:
+  logging:
+    level: "INFO"
+    format: "json"
+    file: "logs/apix.log"
+    max_bytes: 10485760
+    backup_count: 10
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    export_interval: 60
+  health_checks:
+    enabled: true
+    interval: 60
+    timeout: 10
+  alerts:
+    enabled: true
+    webhook_url_env: "ALERT_WEBHOOK_URL"
+    thresholds:
+      collection_failure_rate: 0.2
+      index_staleness_hours: 24
+      forecast_mae_threshold: 5.0
+      data_freshness_hours: 48
+
+# Data Quality
+data_quality:
+  validation:
+    enabled: true
+    outlier_detection:
+      method: "mad_iqr"
+      mad_threshold: 3.5
+      iqr_multiplier: 1.5
+    coverage_threshold: 80.0
+    fare_bounds:
+      min_base_fare: 500
+      max_base_fare: 50000
+      max_total_fare: 100000
+  audit:
+    enabled: true
+    raw_payload_retention_days: 90
+    discrepancy_threshold_pct: 10.0
+  dgca_validation:
+    enabled: true
+    data_path: "data/dgca_monthly_fares.csv"
+    validation_cron: "0 4 * * 1"  # Weekly Monday 04:00
+    output_dir: "validation_reports"
+
+# Storage
+storage:
+  raw_data_path: "data/raw"
+  processed_data_path: "data/processed"
+  export_path: "exports"
+  model_path: "models"
+  log_path: "logs"
+  max_raw_payload_size_mb: 100
+
+# Security
+security:
+  api_key_header: "X-API-Key"
+  jwt_secret_env: "JWT_SECRET"
+  jwt_algorithm: "HS256"
+  jwt_expiry_hours: 24
+  rate_limit_by_ip: true
+  allowed_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "0.0.0.0"
+
+# ML/MLOps
+ml:
+  model_registry:
+    enabled: true
+    backend: "mlflow"
+    tracking_uri: "sqlite:///mlflow.db"
+  experiment_tracking:
+    enabled: true
+  ab_testing:
+    enabled: false

@@ -1,0 +1,6 @@
+effective_from,effective_to,tax_type,rate,source
+2026-01-01,2026-12-31,CENTRAL_EXCISE,11.0,Ministry of Finance / PPAC
+2026-01-01,2026-12-31,STATE_VAT_DELHI,25.0,Delhi VAT Department
+2026-01-01,2026-12-31,STATE_VAT_MAHARASHTRA,25.0,Maharashtra Sales Tax
+2026-01-01,2026-12-31,STATE_VAT_WEST_BENGAL,20.0,West Bengal Commercial Taxes
+2026-01-01,2026-12-31,STATE_VAT_TAMIL_NADU,29.0,Tamil Nadu Commercial Taxes
