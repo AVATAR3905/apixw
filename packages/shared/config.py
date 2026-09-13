@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     CACHE_TTL_SECONDS: int = 1800
     BROWSE_POOL_MAX_CONTEXTS: int = 4
     BROWSE_CONTEXT_IDLE_SECONDS: float = 300.0
+    BROWSE_HEADLESS: bool = True
 
     # API Settings
     API_HOST: str = "0.0.0.0"

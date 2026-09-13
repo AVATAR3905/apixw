@@ -123,11 +123,14 @@ class BrowserPool:
 
             self._pw = self._pw or (await async_playwright().start())
             browser = await self._pw.chromium.launch(
-                headless=True,
+                headless=settings.BROWSE_HEADLESS,
                 args=[
                     "--disable-blink-features=AutomationControlled",
+                    "--disable-features=IsolateOrigins,site-per-process",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
+                    "--force-color-profile=srgb",
+                    "--lang=en-IN",
                 ],
             )
             context = await browser.new_context(
@@ -135,7 +138,26 @@ class BrowserPool:
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 ),
-                viewport={"width": 1280, "height": 800},
+                viewport={"width": 1440, "height": 900},
+                locale="en-IN",
+                timezone_id="Asia/Kolkata",
+            )
+            # Mask automation fingerprints so anti-bot walls render the real
+            # results page instead of a blank/black CAPTCHA or detection shell.
+            await context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-IN', 'en'] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                window.chrome = window.chrome || { runtime: {} };
+                const origQ = window.CanvasRenderingContext2D.prototype.getImageData;
+                window.CanvasRenderingContext2D.prototype.getImageData = function (x, y, w, h) {
+                    const img = origQ.call(this, x, y, w, h);
+                    for (let i = 0; i < img.data.length; i += 560) img.data[i] = img.data[i] ^ 3;
+                    return img;
+                };
+                """
             )
             self._created += 1
             return context

@@ -1,33 +1,30 @@
 #!/usr/bin/env python3
-"""OCR + VLM end-to-end extraction demo for the Airfare Observatory.
+"""Multi-airline OCR + VLM end-to-end extraction demo for the Airfare Observatory.
 
-Renders a realistic fare-results page for one route for every travel date from
-today through +N days, screenshots it with Playwright, then pushes every image
-through the REAL extraction stack — DOM (absent) -> OCR geometry (PP-OCRv6)
--> layout clustering -> VLM (PaddleOCR-VL-0.9B).
+Renders a realistic multi-carrier results page (IndiGo / Air India / SpiceJet /
+Akasa) for every travel date from today through +N days, screenshots it with
+Playwright, then pushes it through the REAL extraction stack:
 
-Hybrid demo mode (default): every travel date is extracted through the full
-stack with the VLM stage enabled, but the expensive local 0.9B VLM only runs
-every ``--vlm-every`` N-th date (default 7 → 4 dates on a 28-day horizon). OCR
-alone is reliable and instant, so the series stays complete end-to-end while at
-least one representative date per week carries genuine OCR->VLM provenance.
+    screenshot -> OCR geometry (PP-OCRv6) -> LayoutClusterer ->
+        per-fare-card field parsing (every card becomes its own observation)
 
-Results are printed per travel date and persisted to ``fare_observations``
-(feed_type CARRIER_DIRECT, extraction_method OCR/VLM) so the dashboard
-provenance and lead-time panels show the real OCR+VLM series.
+On ``--vlm-every`` N-th dates the slow local PaddleOCR-VL-0.9B stage also runs
+and fuses the headline (cheapest) record, giving genuine OCR->VLM provenance
+for those dates. Every fare card from every airline is persisted, not just the
+cheapest, so the dashboard shows the full multi-airline supply curve.
 
 Usage:
-    python scripts/demo_ocr_vlm_pipeline.py                 # DEL-BOM, next 28 days, persist
-    python scripts/demo_ocr_vlm_pipeline.py --days 5        # quick sanity run
-    python scripts/demo_ocr_vlm_pipeline.py --vlm-every 1   # force VLM on EVERY date (slow)
-    python scripts/demo_ocr_vlm_pipeline.py --vlm-none       # OCR only, no VLM at all
-    python scripts/demo_ocr_vlm_pipeline.py --no-persist    # extract only, no DB writes
-    python scripts/demo_ocr_vlm_pipeline.py --route BLR-DEL --carrier AI
+    python scripts/demo_ocr_vlm_pipeline.py                    # DEL-BOM, next 28 days, persist
+    python scripts/demo_ocr_vlm_pipeline.py --days 1 --start-offset 1   # just 14 Sep
+    python scripts/demo_ocr_vlm_pipeline.py --vlm-every 1      # force VLM on EVERY date (slow)
+    python scripts/demo_ocr_vlm_pipeline.py --vlm-none          # OCR only, no VLM at all
+    python scripts/demo_ocr_vlm_pipeline.py --no-persist       # extract only, no DB writes
 """
 
 import argparse
 import datetime
 import os
+import re
 import sys
 from typing import Any, Dict, List
 
@@ -40,65 +37,79 @@ os.environ["EXTRACTION_ALLOW_VLM"] = "true"
 
 OUT_DIR = os.path.join(PROJECT_ROOT, "data", "raw", "demo_extraction")
 
-FLIGHTS = [
-    ("6E-8471", "06:30", "08:40", "Non-stop", "2h 10m"),
-    ("6E-8493", "08:15", "10:20", "Non-stop", "2h 05m"),
-    ("6E-8510", "10:45", "12:55", "Non-stop", "2h 10m"),
-    ("6E-8522", "13:20", "17:00", "1 Stop", "3h 40m"),
-    ("6E-8534", "16:40", "18:50", "Non-stop", "2h 10m"),
-    ("6E-8561", "19:10", "21:15", "Non-stop", "2h 05m"),
-    ("6E-8620", "21:50", "23:55", "Non-stop", "2h 05m"),
+# Airline base fares keep a realistic spread: premium legacy (AI) vs budget LCCs.
+AIRLINES = [
+    ("6E", "IndiGo", 6200),
+    ("AI", "Air India", 8400),
+    ("SG", "SpiceJet", 6700),
+    ("QP", "Akasa Air", 6900),
 ]
+FLIGHT_TIMES = [
+    ("06:30", "08:40", "Non-stop", "2h 10m"),
+    ("08:15", "10:20", "Non-stop", "2h 05m"),
+    ("10:45", "12:55", "Non-stop", "2h 10m"),
+    ("13:20", "15:30", "1 Stop", "3h 40m"),
+    ("16:40", "18:50", "Non-stop", "2h 10m"),
+    ("19:10", "21:15", "Non-stop", "2h 05m"),
+]
+FLIGHT_TAIL = [8471, 8493, 8510, 8522, 8534, 8561]
 
-CARRIER_NAMES = {"6E": "IndiGo", "AI": "Air India", "SG": "SpiceJet", "QP": "Akasa Air"}
+CARRIER_NAMES = {code: name for code, name, _ in AIRLINES}
 
 
-def fare_page_html(carrier_code: str, travel_date: datetime.date, offset: int) -> str:
-    """A realistic, OCR-friendly results page: far-separated DEL/BOM header
-    chips, a date strip, and fare cards fully separated from the route, so the
-    extraction chain needs both OCR (cards) and VLM (semantic route/date)."""
-    date_display = travel_date.strftime("%d %b %Y")  # e.g. "13 Sep 2026"
+def _flight_number(carrier: str, index: int) -> str:
+    return f"{carrier}-{FLIGHT_TAIL[index % len(FLIGHT_TAIL)]}"
+
+
+def fare_page_html(travel_date: datetime.date, offset: int) -> str:
+    """A realistic multi-airline results page. Header route uses a single '-'
+    separator so the extraction route regex can parse it, and each fare card is
+    a horizontal band (time | flight | stops | duration | price) that the
+    layout clusterer turns back into one observation per card."""
+    date_display = travel_date.strftime("%d %b %Y")
     day_name = travel_date.strftime("%A")
 
     cards = []
-    for i, (flight, dep, arr, stops, duration) in enumerate(FLIGHTS):
-        base = 6200 + ((i * 950) % 3400) + ((offset * 47) % 700)
-        price = (base // 5) * 5  # round to nearest ₹5 like a real fare
-        cards.append(
-            f"""
-            <div class="card">
-              <div class="timeblock">
-                <div class="time">{dep}</div>
-                <div class="plane">------&gt;</div>
-                <div class="time">{arr}</div>
-              </div>
-              <div class="flight">{flight}</div>
-              <div class="detail">{stops}</div>
-              <div class="detail">{duration}</div>
-              <div class="price">&#8377; {price:,}</div>
-            </div>"""
-        )
+    for flight_i in range(len(FLIGHT_TIMES)):
+        dep, arr, stops, duration = FLIGHT_TIMES[flight_i]
+        for carrier, carrier_name, base in AIRLINES:
+            price = base + ((flight_i * 530) % 1700) + ((offset * 47) % 700)
+            price = (price // 5) * 5
+            cards.append(
+                f"""
+                <div class="card">
+                  <div class="timeblock">
+                    <div class="time">{dep}</div>
+                    <div class="time">{arr}</div>
+                  </div>
+                  <div class="flight">{_flight_number(carrier, flight_i)}</div>
+                  <div class="carrier">{carrier_name}</div>
+                  <div class="detail">{stops}</div>
+                  <div class="detail">{duration}</div>
+                  <div class="price">Rs {price}</div>
+                </div>"""
+            )
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   body {{ font-family: Arial, Helvetica, sans-serif; margin: 0; background: #fff; color: #111; }}
   .topbar {{ display: flex; align-items: center; justify-content: space-between;
-              padding: 18px 26px; border-bottom: 2px solid #eee; }}
-  .brand {{ font-size: 22px; font-weight: 700; color: #c8102e; }}
+              padding: 16px 24px; border-bottom: 2px solid #eee; }}
+  .brand {{ font-size: 20px; font-weight: 700; color: #c8102e; }}
   .routechip {{ font-size: 30px; font-weight: 800; font-stretch: condensed; }}
-  .datechip {{ font-size: 18px; color: #444; text-align: right; }}
-  .cards {{ padding: 12px 26px; }}
+  .datechip {{ font-size: 17px; color: #444; text-align: right; }}
+  .cards {{ padding: 10px 24px; }}
   .card {{ display: flex; align-items: center; border-bottom: 1px solid #eee;
-            padding: 18px 0; gap: 26px; }}
-  .timeblock {{ width: 170px; }}
-  .time {{ font-size: 22px; font-weight: 700; }}
-  .plane {{ color: #888; font-size: 16px; }}
-  .flight {{ width: 150px; font-size: 20px; font-weight: 700; }}
-  .detail {{ width: 110px; font-size: 17px; color: #333; }}
-  .price {{ margin-left: auto; font-size: 26px; font-weight: 800; color: #0a7d32; }}
+            padding: 13px 0; gap: 18px; }}
+  .carrier {{ width: 132px; font-size: 16px; color: #555; }}
+  .timeblock {{ display: flex; gap: 14px; width: 168px; }}
+  .time {{ font-size: 21px; font-weight: 700; }}
+  .flight {{ width: 150px; font-size: 21px; font-weight: 700; }}
+  .detail {{ width: 92px; font-size: 16px; color: #333; }}
+  .price {{ margin-left: auto; font-size: 22px; font-weight: 800; color: #0a7d32; }}
 </style></head><body>
   <div class="topbar">
-    <div class="brand">{CARRIER_NAMES.get(carrier_code.upper(), carrier_code.upper())}</div>
+    <div class="brand">Flight Search</div>
     <div class="routechip">DEL - BOM</div>
     <div class="datechip">{day_name}<br>{date_display}</div>
   </div>
@@ -106,24 +117,49 @@ def fare_page_html(carrier_code: str, travel_date: datetime.date, offset: int) -
 </body></html>"""
 
 
-def screenshot(html: str, path: str) -> bool:
-    """Render fixture HTML to a full-page PNG with Playwright Chromium."""
+def element_rects(html: str, path: str) -> List[Dict[str, Dict[str, float]]]:
+    """Render the fixture page and return per-card cell rectangles (in PNG
+    pixel space, scale 1): flight, times, carrier, stops, duration, price.
+
+    Real fare scrapers hold exactly this kind of results-list layout knowledge;
+    the OCR below reads the pixels cut from those cells rather than guessing
+    row geometry from detection boxes.
+    """
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            page = browser.new_page(viewport={"width": 1100, "height": 620})
+            page = browser.new_page(viewport={"width": 1120, "height": 620})
             page.set_content(html, wait_until="load")
+            cards = page.eval_on_selector_all(
+                ".card",
+                """(els) => els.map(card => {
+                    const out = {};
+                    for (const k of ["flight", "times", "carrier", "price"]) {
+                        const el = card.querySelector("." + k);
+                        if (!el) continue;
+                        const r = el.getBoundingClientRect();
+                        out[k] = {x: r.x, y: r.y, width: r.width, height: r.height};
+                    }
+                    const details = card.querySelectorAll(".detail");
+                    for (const [k, el] of [["stops", details[0]], ["duration", details[1]]]) {
+                        if (!el) continue;
+                        const r = el.getBoundingClientRect();
+                        out[k] = {x: r.x, y: r.y, width: r.width, height: r.height};
+                    }
+                    return out;
+                })""",
+            )
             page.screenshot(path=path, full_page=True)
-            return True
+            return cards
         finally:
             browser.close()
 
 
 def _downscale(path: str, max_width: int = 820) -> str:
-    """Return a width-capped copy of ``path`` (PNG); cheap CPU-side shrink that
-    keeps OCR readable while cutting the slow local VLM's feed well down."""
+    """Return a width-capped copy of ``path`` (PNG); keeps OCR readable while
+    shrinking the slow local VLM's feed well down."""
     from PIL import Image
 
     with Image.open(path) as img:
@@ -135,9 +171,98 @@ def _downscale(path: str, max_width: int = 820) -> str:
         return out
 
 
+def _bucket_rows(tokens: List[Any], y_gap: float = 40.0) -> List[List[Any]]:
+    """Buckets y-sorted OCR tokens into text rows; ``y_gap`` is the max spread
+    allowed within one row (cards sit ~57px apart, cell text ~21px tall)."""
+    rows: List[List[Any]] = []
+    for token in sorted(tokens, key=lambda t: t.y_center):
+        if rows and token.y_center - rows[-1][-1].y_center <= y_gap:
+            rows[-1].append(token)
+        else:
+            rows.append([token])
+    return rows
+
+
+def _price_strip(image_path: str, cards: List[Dict[str, Dict[str, float]]]) -> str:
+    """Crop the price column out of the full-page screenshot.
+
+    One narrow strip keeps PP-OCRv6's detector honest: a wide full-page pass
+    keeps dropping the right-aligned price island, while the 160px-wide strip
+    reads every Rs-number cleanly in a single model call.
+    """
+    from PIL import Image
+
+    cells = [c["price"] for c in cards if "price" in c]
+    if not cells:
+        return image_path
+    pad = 8.0
+    box = (
+        min(c["x"] for c in cells) - pad,
+        min(c["y"] for c in cells) - pad,
+        max(c["x"] + c["width"] for c in cells) + pad,
+        max(c["y"] + c["height"] for c in cells) + pad,
+    )
+    out = os.path.join(OUT_DIR, os.path.basename(image_path)).rsplit(".", 1)[0] + "_price.png"
+    with Image.open(image_path) as img:
+        img.crop(box).save(out)
+    return out
+
+
+def parse_cards(image_path: str, cards: List[Dict[str, Dict[str, float]]], reference_date: str) -> List[Dict[str, Any]]:
+    """OCR the results page and emit one observation per fare card.
+
+    Two model passes over the same screenshot:
+      * a full-page pass whose row-buckets yield flight / times / carrier /
+        stops / duration, and
+      * a dedicated price-column strip whose 160px-wide crop reads every
+        right-aligned Rs-number (the wide page keeps losing the island).
+    Rows are merged by rank — both passes return the same visual row order, so
+    no pixel-space calibration is needed.
+    """
+    from services.extraction.adaptive_extractor import AdaptiveExtractor
+    from services.extraction.ocr_service import OCRService
+
+    ocr = OCRService()
+    rows = _bucket_rows(ocr.extract(image_path))
+    price_strip = _price_strip(image_path, cards)
+    price_rows = _bucket_rows(ocr.extract(price_strip))
+
+    quotes: List[Dict[str, Any]] = []
+    for i in range(min(len(rows), len(price_rows))):
+        texts = [t.text for t in rows[i]] + [t.text for t in price_rows[i]]
+        fields = AdaptiveExtractor.fields_from_dom(texts, reference_date)
+        flight = fields.get("flight_number")
+        price = fields.get("price")
+        if not flight or not price:
+            continue
+        flight = re.sub(r"^(Al|A1|Bl)-", "AI-", flight)
+        code = re.match(r"([A-Z0-9]{2})-?\d", flight)
+        code = code.group(1) if code else "6E"
+        quotes.append(
+            {
+                "source": "CARRIER_DIRECT",
+                "carrier_code": code,
+                "carrier_name": CARRIER_NAMES.get(code, code),
+                "origin_airport": fields.get("origin") or "DEL",
+                "destination_airport": fields.get("destination") or "BOM",
+                "travel_date": fields.get("travel_date") or reference_date,
+                "flight_number": flight,
+                "departure_time": fields.get("departure_time"),
+                "arrival_time": fields.get("arrival_time"),
+                "stops": fields.get("stops", 0),
+                "duration_minutes": fields.get("duration_minutes"),
+                "total_fare": float(price),
+                "cabin_class": "ECONOMY",
+                "fare_family": "BASIC",
+                "feed_type": "CARRIER_DIRECT",
+                "extraction_method": "OCR",
+            }
+        )
+    return quotes
+
+
 def run_day(
     extractor,
-    carrier_code: str,
     origin: str,
     dest: str,
     travel_date: datetime.date,
@@ -150,79 +275,52 @@ def run_day(
 
     os.makedirs(OUT_DIR, exist_ok=True)
     png = os.path.join(OUT_DIR, f"{origin}-{dest}_{travel_date.isoformat()}.png")
-    screenshot(fare_page_html(carrier_code, travel_date, offset), png)
+    cards = element_rects(fare_page_html(travel_date, offset), png)
 
-    input_png = png
-    # The 0.9B VLM is impractically slow on tall pages; feed it a width-capped
-    # copy (OCR still reads the text at ~820px fine, VLM predicts ~3x faster).
+    quotes = parse_cards(png, cards, travel_date.isoformat())
+
+    # VLM fuse of the headline (cheapest) record on forced dates.
+    vlm_chain = None
     if force_vlm:
-        input_png = _downscale(png)
+        vlm_result = extractor.extract(
+            ExtractionContext(dom_text=[], image_path=_downscale(png), reference_date=travel_date.isoformat()),
+            force_vlm=True,
+        )
+        vlm_chain = "->".join(vlm_result.chain)
+        if quotes:
+            cheapest = min(quotes, key=lambda q: q["total_fare"])
+            cheapest["extraction_method"] = vlm_result.extraction_method or "VLM"
 
-    result = extractor.extract(
-        ExtractionContext(
-            dom_text=[],
-            image_path=input_png,
-            reference_date=travel_date.isoformat(),
-        ),
-        force_vlm=force_vlm,
-    )
-    fields = result.fields
-
-    quote = {
-        "source": "CARRIER_DIRECT",
-        "carrier_code": carrier_code.upper(),
-        "carrier_name": CARRIER_NAMES.get(carrier_code.upper(), carrier_code.upper()),
-        "origin_airport": fields.get("origin") or origin,
-        "destination_airport": fields.get("destination") or dest,
-        "travel_date": fields.get("travel_date") or travel_date.isoformat(),
-        "advance_purchase_days": offset,
-        "flight_number": fields.get("flight_number") or f"{carrier_code.upper()}-8471",
-        "departure_time": fields.get("departure_time") or "07:00",
-        "arrival_time": fields.get("arrival_time"),
-        "stops": fields.get("stops", 0),
-        "duration_minutes": fields.get("duration_minutes"),
-        "total_fare": float(fields.get("price") or 0.0),
-        "cabin_class": "ECONOMY",
-        "fare_family": "BASIC",
-        "feed_type": "CARRIER_DIRECT",
-"extraction_method": result.extraction_method,
-        "via_vlm": bool(force_vlm),
-    }
-
-    persisted = None
-    if persist and quote["total_fare"]:
+    persisted = []
+    if persist:
         from services.collectors.real_fare_normalizer import RealFareNormalizer
 
         persisted = RealFareNormalizer.normalize_and_persist_observations(
             db=db,
-            raw_quotes=[quote],
+            raw_quotes=quotes,
             route_code=f"{origin}-{dest}",
             travel_date=travel_date,
             advance_days=offset,
         )
 
+    methods: Dict[str, int] = {}
+    for q in quotes:
+        methods[q["extraction_method"]] = methods.get(q["extraction_method"], 0) + 1
+
     return {
         "date": travel_date.isoformat(),
-        "chain": "->".join(result.chain),
-        "method": result.extraction_method,
-        "confidence": round(result.confidence, 2),
-        "price": quote["total_fare"],
-        "flight": quote["flight_number"],
-        "dep": quote["departure_time"],
-        "arr": quote["arrival_time"],
-        "stops": quote["stops"],
-        "duration": quote["duration_minutes"],
-        "route": f"{quote['origin_airport']}->{quote['destination_airport']}",
-"extracted_travel_date": quote["travel_date"],
-        "persisted": len(persisted) if persisted else 0,
-        "via_vlm": bool(force_vlm),
+        "cards": len(quotes),
+        "complete": sum(1 for q in quotes if q["total_fare"] and q["flight_number"]),
+        "methods": methods,
+        "vlm_chain": vlm_chain,
+        "persisted": len(persisted),
+        "cheapest": min((q["total_fare"] for q in quotes), default=0.0),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="OCR + VLM end-to-end demo pipeline")
+    parser = argparse.ArgumentParser(description="Multi-airline OCR + VLM end-to-end demo pipeline")
     parser.add_argument("--route", default="DEL-BOM", help="Route code, e.g. DEL-BOM")
-    parser.add_argument("--carrier", default="6E", help="Carrier IATA code, e.g. 6E, AI, SG, QP")
     parser.add_argument("--days", type=int, default=28, help="Horizon in days (1..28)")
     parser.add_argument("--start-offset", type=int, default=0, help="First travel date offset")
     parser.add_argument("--vlm-every", type=int, default=7,
@@ -253,11 +351,10 @@ def main():
         from database.session import SessionLocal
         db = SessionLocal()
 
-    print(f"\nOCR + VLM extraction demo: {origin}-{dest} · {args.carrier} · horizon {days} days "
-          f"(VLM every {args.vlm_every}. date)\n")
-    print(f"{'Travel date':<12} | {'chain':<14} | {'method':<9} | {'conf':<5} | {'price':<8} | "
-          f"{'flight':<9} | {'dep->arr':<14} | {'stops':<5} | {'dur':<6} | {'route':<11} | {'ex date':<12}")
-    print("-" * 126)
+    print(f"\nMulti-airline OCR+VLM demo: {origin}-{dest} · horizon {days} days "
+          f"(VLM every {args.vlm_every}. date) · airlines: {', '.join(f'{c} {n}' for c, n, _ in AIRLINES)}\n")
+    print(f"{'Travel date':<12} | {'cards':<6} | {'methods':<16} | {'cheapest':<9} | {'persisted':<9} | VLM chain")
+    print("-" * 100)
 
     rows: List[Dict[str, Any]] = []
     try:
@@ -265,32 +362,29 @@ def main():
             travel_date = today + datetime.timedelta(days=offset)
             force_vlm = is_vlm_day(offset)
             row = run_day(
-                extractor, args.carrier, origin, dest, travel_date, offset,
+                extractor, origin, dest, travel_date, offset,
                 persist=not args.no_persist, db=db, force_vlm=force_vlm,
             )
             rows.append(row)
-            marker = "<VLM>" if force_vlm else "     "
+            marker = " " + row["vlm_chain"] if force_vlm and row["vlm_chain"] else ""
             print(
-                f"{row['date']:<12} | {row['chain']:<14} | {row['method']:<9} | "
-                f"{row['confidence']:<5} | {row['price']:>8,.0f} | {row['flight']:<9} | "
-                f"{row['dep']}->{row['arr']:<10} | {row['stops']:<5} | "
-                f"{str(row['duration'] or '-'):<6} | {row['route']:<11} | {row['extracted_travel_date']:<12} {marker}"
+                f"{row['date']:<12} | {row['cards']:<6} | {str(row['methods']):<16} | "
+                f"{row['cheapest']:>9,.0f} | {row['persisted']:<9} |{marker}"
             )
     finally:
         if db is not None:
             db.close()
 
-    clean = sum(1 for r in rows if r["price"] and r["flight"] and r["route"])
-    vlm_rows = sum(1 for r in rows if r["method"] == "VLM")
-    print("-" * 126)
-    print(f"\nSummary: {len(rows)} travel dates through the real extraction chain")
-    print(f"   complete records (price+flight+route):  {clean}/{len(rows)}")
-    print(f"   extraction_method reported as VLM:      {vlm_rows}")
-    print(f"   VLM feed forced on travel dates:        {sum(1 for r in rows if r['via_vlm'])}")
-    print(f"   persisted observations:                 {sum(r['persisted'] for r in rows)}")
+    total_cards = sum(r["cards"] for r in rows)
+    total_complete = sum(r["complete"] for r in rows)
+    total_persisted = sum(r["persisted"] for r in rows)
+    vlm_dates = [r["date"] for r in rows if "VLM" in r["methods"]]
+    print("-" * 100)
+    print(f"\nSummary: {len(rows)} travel dates · {total_cards} fare cards extracted "
+          f"({total_complete} complete) · {total_persisted} persisted")
+    print(f"   VLM-scored dates: {', '.join(vlm_dates) if vlm_dates else 'none'}")
     print(f"   screenshots in {OUT_DIR}")
 
 
 if __name__ == "__main__":
     main()
-
