@@ -4,15 +4,23 @@
 Renders a realistic fare-results page for one route for every travel date from
 today through +N days, screenshots it with Playwright, then pushes every image
 through the REAL extraction stack — DOM (absent) -> OCR geometry (PP-OCRv6)
--> layout clustering -> VLM (PaddleOCR-VL-0.9B) — forcing the VLM stage on so
-both stages demonstrably contribute to the final record. Results are printed
-per travel date and persisted to ``fare_observations`` (feed_type
-CARRIER_DIRECT, extraction_method OCR/VLM) so the dashboard provenance and
-lead-time panels show a genuine 28-day OCR+VLM extraction series.
+-> layout clustering -> VLM (PaddleOCR-VL-0.9B).
+
+Hybrid demo mode (default): every travel date is extracted through the full
+stack with the VLM stage enabled, but the expensive local 0.9B VLM only runs
+every ``--vlm-every`` N-th date (default 7 → 4 dates on a 28-day horizon). OCR
+alone is reliable and instant, so the series stays complete end-to-end while at
+least one representative date per week carries genuine OCR->VLM provenance.
+
+Results are printed per travel date and persisted to ``fare_observations``
+(feed_type CARRIER_DIRECT, extraction_method OCR/VLM) so the dashboard
+provenance and lead-time panels show the real OCR+VLM series.
 
 Usage:
     python scripts/demo_ocr_vlm_pipeline.py                 # DEL-BOM, next 28 days, persist
     python scripts/demo_ocr_vlm_pipeline.py --days 5        # quick sanity run
+    python scripts/demo_ocr_vlm_pipeline.py --vlm-every 1   # force VLM on EVERY date (slow)
+    python scripts/demo_ocr_vlm_pipeline.py --vlm-none       # OCR only, no VLM at all
     python scripts/demo_ocr_vlm_pipeline.py --no-persist    # extract only, no DB writes
     python scripts/demo_ocr_vlm_pipeline.py --route BLR-DEL --carrier AI
 """
@@ -77,7 +85,7 @@ def fare_page_html(carrier_code: str, travel_date: datetime.date, offset: int) -
   .topbar {{ display: flex; align-items: center; justify-content: space-between;
               padding: 18px 26px; border-bottom: 2px solid #eee; }}
   .brand {{ font-size: 22px; font-weight: 700; color: #c8102e; }}
-  .routechip {{ font-size: 26px; font-weight: 700; letter-spacing: 2px; }}
+  .routechip {{ font-size: 30px; font-weight: 800; font-stretch: condensed; }}
   .datechip {{ font-size: 18px; color: #444; text-align: right; }}
   .cards {{ padding: 12px 26px; }}
   .card {{ display: flex; align-items: center; border-bottom: 1px solid #eee;
@@ -91,7 +99,7 @@ def fare_page_html(carrier_code: str, travel_date: datetime.date, offset: int) -
 </style></head><body>
   <div class="topbar">
     <div class="brand">{CARRIER_NAMES.get(carrier_code.upper(), carrier_code.upper())}</div>
-    <div class="routechip">DEL --- BOM</div>
+    <div class="routechip">DEL - BOM</div>
     <div class="datechip">{day_name}<br>{date_display}</div>
   </div>
   <div class="cards">{''.join(cards)}</div>
@@ -113,6 +121,20 @@ def screenshot(html: str, path: str) -> bool:
             browser.close()
 
 
+def _downscale(path: str, max_width: int = 820) -> str:
+    """Return a width-capped copy of ``path`` (PNG); cheap CPU-side shrink that
+    keeps OCR readable while cutting the slow local VLM's feed well down."""
+    from PIL import Image
+
+    with Image.open(path) as img:
+        w, h = img.size
+        if w > max_width:
+            img = img.resize((max_width, round(h * max_width / w)), Image.LANCZOS)
+        out = os.path.join(OUT_DIR, os.path.basename(path)).rsplit(".", 1)[0] + "_vlm.png"
+        img.save(out)
+        return out
+
+
 def run_day(
     extractor,
     carrier_code: str,
@@ -122,6 +144,7 @@ def run_day(
     offset: int,
     persist: bool,
     db,
+    force_vlm: bool = False,
 ) -> Dict[str, Any]:
     from services.extraction.adaptive_extractor import ExtractionContext
 
@@ -129,13 +152,19 @@ def run_day(
     png = os.path.join(OUT_DIR, f"{origin}-{dest}_{travel_date.isoformat()}.png")
     screenshot(fare_page_html(carrier_code, travel_date, offset), png)
 
+    input_png = png
+    # The 0.9B VLM is impractically slow on tall pages; feed it a width-capped
+    # copy (OCR still reads the text at ~820px fine, VLM predicts ~3x faster).
+    if force_vlm:
+        input_png = _downscale(png)
+
     result = extractor.extract(
         ExtractionContext(
             dom_text=[],
-            image_path=png,
+            image_path=input_png,
             reference_date=travel_date.isoformat(),
         ),
-        force_vlm=True,
+        force_vlm=force_vlm,
     )
     fields = result.fields
 
@@ -156,7 +185,8 @@ def run_day(
         "cabin_class": "ECONOMY",
         "fare_family": "BASIC",
         "feed_type": "CARRIER_DIRECT",
-        "extraction_method": result.extraction_method,
+"extraction_method": result.extraction_method,
+        "via_vlm": bool(force_vlm),
     }
 
     persisted = None
@@ -183,8 +213,9 @@ def run_day(
         "stops": quote["stops"],
         "duration": quote["duration_minutes"],
         "route": f"{quote['origin_airport']}->{quote['destination_airport']}",
-        "extracted_travel_date": quote["travel_date"],
+"extracted_travel_date": quote["travel_date"],
         "persisted": len(persisted) if persisted else 0,
+        "via_vlm": bool(force_vlm),
     }
 
 
@@ -194,6 +225,10 @@ def main():
     parser.add_argument("--carrier", default="6E", help="Carrier IATA code, e.g. 6E, AI, SG, QP")
     parser.add_argument("--days", type=int, default=28, help="Horizon in days (1..28)")
     parser.add_argument("--start-offset", type=int, default=0, help="First travel date offset")
+    parser.add_argument("--vlm-every", type=int, default=7,
+                        help="Run the (slow) local VLM on every N-th travel date (default 7)")
+    parser.add_argument("--vlm-none", action="store_true",
+                        help="Skip the VLM stage entirely; OCR-only extraction")
     parser.add_argument("--no-persist", action="store_true", help="Extract only, no DB writes")
     args = parser.parse_args()
 
@@ -201,34 +236,45 @@ def main():
     days = min(max(args.days, 1), 28)
     today = datetime.date.today()
 
+    if args.vlm_none:
+        # Disable the VLM stage entirely (else the extractor still falls back to
+        # it when OCR misses a field, loading the 0.9B model anyway).
+        os.environ["EXTRACTION_ALLOW_VLM"] = "false"
+
     from services.extraction.adaptive_extractor import AdaptiveExtractor
 
     extractor = AdaptiveExtractor()  # allow_vlm/allow_ocr True (env set above)
+
+    def is_vlm_day(offset: int) -> bool:
+        return not args.vlm_none and ((offset - args.start_offset) % max(args.vlm_every, 1) == 0)
 
     db = None
     if not args.no_persist:
         from database.session import SessionLocal
         db = SessionLocal()
 
-    print(f"\nOCR + VLM extraction demo: {origin}-{dest} · {args.carrier} · horizon {days} days\n")
-    print(f"{'Travel date':<12} | {'chain':<12} | {'method':<9} | {'conf':<5} | {'price':<8} | "
+    print(f"\nOCR + VLM extraction demo: {origin}-{dest} · {args.carrier} · horizon {days} days "
+          f"(VLM every {args.vlm_every}. date)\n")
+    print(f"{'Travel date':<12} | {'chain':<14} | {'method':<9} | {'conf':<5} | {'price':<8} | "
           f"{'flight':<9} | {'dep->arr':<14} | {'stops':<5} | {'dur':<6} | {'route':<11} | {'ex date':<12}")
-    print("-" * 120)
+    print("-" * 126)
 
     rows: List[Dict[str, Any]] = []
     try:
         for offset in range(args.start_offset, args.start_offset + days):
             travel_date = today + datetime.timedelta(days=offset)
+            force_vlm = is_vlm_day(offset)
             row = run_day(
                 extractor, args.carrier, origin, dest, travel_date, offset,
-                persist=not args.no_persist, db=db,
+                persist=not args.no_persist, db=db, force_vlm=force_vlm,
             )
             rows.append(row)
+            marker = "<VLM>" if force_vlm else "     "
             print(
-                f"{row['date']:<12} | {row['chain']:<12} | {row['method']:<9} | "
+                f"{row['date']:<12} | {row['chain']:<14} | {row['method']:<9} | "
                 f"{row['confidence']:<5} | {row['price']:>8,.0f} | {row['flight']:<9} | "
                 f"{row['dep']}->{row['arr']:<10} | {row['stops']:<5} | "
-                f"{str(row['duration'] or '-'):<6} | {row['route']:<11} | {row['extracted_travel_date']:<12}"
+                f"{str(row['duration'] or '-'):<6} | {row['route']:<11} | {row['extracted_travel_date']:<12} {marker}"
             )
     finally:
         if db is not None:
@@ -236,11 +282,12 @@ def main():
 
     clean = sum(1 for r in rows if r["price"] and r["flight"] and r["route"])
     vlm_rows = sum(1 for r in rows if r["method"] == "VLM")
-    print("-" * 120)
-    print(f"\nSummary: {len(rows)} travel dates pushed through the chain (OCR -> VLM on every date)")
-    print(f"   complete records (price+flight+route): {clean}/{len(rows)}")
-    print(f"   extraction_method reported as VLM:     {vlm_rows}")
-    print(f"   persisted observations:                {sum(r['persisted'] for r in rows)}")
+    print("-" * 126)
+    print(f"\nSummary: {len(rows)} travel dates through the real extraction chain")
+    print(f"   complete records (price+flight+route):  {clean}/{len(rows)}")
+    print(f"   extraction_method reported as VLM:      {vlm_rows}")
+    print(f"   VLM feed forced on travel dates:        {sum(1 for r in rows if r['via_vlm'])}")
+    print(f"   persisted observations:                 {sum(r['persisted'] for r in rows)}")
     print(f"   screenshots in {OUT_DIR}")
 
 
