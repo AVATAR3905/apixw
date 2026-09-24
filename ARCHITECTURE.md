@@ -56,8 +56,11 @@
                                          v
 +-----------------------------------------------------------------------------------+
 |                         INGESTION & COLLECTION WORKFLOW                           |
-|  - APScheduler 4x Daily Snapshot Scheduler: 06:00 / 12:00 / 18:00 / 23:00 IST     |
-|    (each snapshot triggers the 10-route x 5-horizon collection cycle)             |
+|  - GitHub Actions 4x Daily Cycle: 06:00 / 12:00 / 18:00 / 23:00 IST, independent  |
+|    of the local machine (.github/workflows/collect.yml); local syncs via pull     |
+|    (see Section 2 "Where Collection Actually Runs" below)                         |
+|  - Resume-on-crash: skips route/horizons already COMPLETED for the date/source,   |
+|    marks orphaned PENDING jobs FAILED and retries them (collection_scheduler.py)  |
 |  - Circuit Breakers & Exponential Backoff Retries (circuit_breaker.py)            |
 |  - Source Compliance & Permission State-Machine (source_registry.py)              |
 |  - SHA-256 Tamper-Evident Raw Payload Storage (payload_store.py)                  |
@@ -96,6 +99,101 @@
 ---
 
 ## 2. Ingestion & Collection Layer
+
+### 2.0 Source Map — Every Candidate Site, Current Status, and Why
+
+Every source in scope for this project falls into exactly one adapter interface (below),
+and every source has a definitive, tested status — not "we haven't tried" but "we tried,
+and here is exactly what happened":
+
+| Source | Interface | Status | Why |
+|---|---|---|---|
+| **SpiceJet (SG)** | `CarrierDirectScraper` | ✅ Real (`NETWORK_API`) | Real `api/v3/search/availability` JSON intercept; genuine base/tax/fee split |
+| **Akasa Air (QP)** | `CarrierDirectScraper` | ✅ Real (`DOM_BROWSER`), locally | Homepage-form flow + `/api/ibe/availability/search` intercept. **Blocked on GitHub Actions specifically** — Akasa's server won't serve `robots.txt` to GitHub's datacenter IP range, and `RobotsTxtChecker` correctly fails safe rather than scrape unverified |
+| **Google Flights RPC** | `RealFlightRPCConnector` | ✅ Real | Via the `fast_flights` library — a documented client for Google Flights' own public search backend, not scraping google.com's HTML. Works from both local and GitHub IPs |
+| **Ixigo** | `BaseOTAScraper` (`IxigoScraper`) | ✅ Real, all 10 routes locally; ⚠️ unreliable from GitHub Actions | Real homepage-form + DOM/OCR card extraction. GitHub-runner failures are UI-interaction timeouts (`Locator.click`), not a clean block signature — not yet root-caused |
+| **EaseMyTrip** | `BaseOTAScraper` (`EaseMyTripScraper`) | ✅ Real, all 10 routes locally; ⚠️ unreliable from GitHub Actions | Same pattern as Ixigo |
+| **Skyscanner (RapidAPI "Sky Scrapper")** | `BaseOTAScraper` (`SkyscannerScraper`) | ✅ Real when quota available | Licensed RapidAPI wrapper around Skyscanner's backend, not a scrape of skyscanner.co.in. Free tier is 100 req/month; currently exhausted |
+| **Amadeus** | `PARTNER_API` (`AmadeusScraper`) | ⚙️ Wired, no credentials | Self-service developer portal was decommissioned 2026-07-17; only the Enterprise (paid, commercial-agreement) API remains. Adapter raises `AmadeusCredentialsMissing` and degrades to calibrated baseline until real credentials are supplied |
+| **Sabre** | `PARTNER_API` (`SabreScraper`) | ⚙️ Wired, no credentials | Free self-service test/cert environment exists (`developer.sabre.com`) but requires manual account registration; adapter is built and ready the moment `SABRE_USERNAME`/`SABRE_PASSWORD` land in `.env` |
+| **IndiGo (6E)** | `CarrierDirectScraper` | 🚫 Blocked, confirmed | IP-reputation block on datacenter/cloud egress — even a stealth-free vanilla Playwright context gets the same generic error page. Removed from the active collection loop entirely (it was also causing multi-minute hangs with no bounded timeout) |
+| **MakeMyTrip** | `BaseOTAScraper` (`MakeMyTripScraper`) | 🚫 Blocked, confirmed | TLS/HTTP2-level block (`ERR_HTTP2_PROTOCOL_ERROR`) before any content loads — connection refused, no page to extract from by any method (DOM, OCR, or VLM) |
+| **Yatra** | `BaseOTAScraper` (`YatraScraper`) | 🚫 Blocked, confirmed | Same TLS/HTTP2-level block as MakeMyTrip |
+| **Air India** | `CarrierDirectScraper` | 🚫 Blocked, confirmed | Same TLS/HTTP2-level block |
+| **Air India Express (IX)** | `CarrierDirectScraper` | 🚫 Rate-limited, confirmed | Site's own "search after some time" throttle after repeated automated attempts — respected, not pushed through |
+| **Cleartrip** | `BaseOTAScraper` (`CleartripScraper`) | 🚫 Blocked, confirmed | Not a network-level block — the full form flow (origin, destination, calendar) works, but the results page rejects Cleartrip's own generated URL ("wrong url") reproducibly. Most likely needs in-app AJAX session state a hard navigation doesn't carry; not a guessable fix |
+
+**Every entry above with a 🚫 was individually investigated, not assumed.** The
+`ethical_scraping.py` module gates every attempt through a real `urllib.robotparser`
+check and a bot-challenge-page detector (so a block page is never misread as "zero
+fares"), and building tooling to route around any of these — IP rotation, TLS/fingerprint
+spoofing, CAPTCHA solving — remains out of scope regardless of how the request is framed.
+That boundary doesn't change what's genuinely achievable here: five real sources work
+today, two more (Amadeus/Sabre) are one credential away from working, and the six
+`🚫` rows are the actual site owner's decision, not a gap in this system's design.
+
+### 2.1 Unified Adapter Pattern
+
+Every source implements one of three consistent interfaces, so adding a new *legitimate*
+source (a new OTA, a licensed partner feed) is a bounded, well-defined extension:
+
+```
+BaseOTAScraper (abstract)
+  .scrape_corridor(origin, dest, travel_date, advance_days, db) -> List[quote]
+  ._execute_scrape(...)          # subclass: real network/DOM logic
+  ._generate_calibrated_quotes() # subclass: deterministic offline fallback
+  -- circuit breaker + calibrated-fallback degrade built into the base class,
+     never duplicated per-scraper
+
+CarrierDirectScraper
+  .scrape_carrier_corridor(carrier_code, origin, dest, advance_days, db)
+  -- pooled browser context -> dedicated launch -> calibrated baseline,
+     same three-tier degrade chain for every carrier
+
+PARTNER_API adapters (Amadeus, Sabre)
+  .scrape_corridor(...) same signature as BaseOTAScraper
+  -- OAuth2 credential fetch -> raise *CredentialsMissing -> calibrated
+     fallback; never silently promotes a fallback to "real"
+```
+
+Every adapter, regardless of interface, ultimately produces the same normalized quote
+shape (`feed_type`, `extraction_method`, `carrier_code`, fare fields) and flows through
+the single `RealFareNormalizer.normalize_and_persist_observations` gate, which now
+actually runs `QualityEngine.evaluate()` per observation (route validity,
+fare-decomposition-sum consistency, plausible-range review) rather than stamping a fixed
+score — see TASKS.md v2.7.
+
+### 2.2 Where Collection Actually Runs
+
+```
+┌─────────────────────────────┐        commits          ┌──────────────────────┐
+│   GitHub Actions             │  updated airfare_       │   GitHub (main)      │
+│   (ubuntu-latest, free/      │  observatory.db  ─────► │   source of truth    │
+│   unlimited on this public   │  every run               │   for collected data │
+│   repo)                      │                          └───────────┬──────────┘
+│                               │                                      │
+│  06:00 / 12:00 / 18:00 /     │                                      │ git pull
+│  23:00 IST cron, or manual   │                                      │ (every 30 min,
+│  workflow_dispatch            │                                      │  only when new
+└───────────────────────────────┘                                      │  commits exist)
+                                                                        ▼
+                                                          ┌──────────────────────┐
+                                                          │  Local machine        │
+                                                          │  "APIx GitHub Sync"   │
+                                                          │  task: stops the API  │
+                                                          │  server (releases the │
+                                                          │  DB file lock), pulls,│
+                                                          │  restarts it          │
+                                                          └──────────────────────┘
+```
+
+Local collection (`scripts/collect_full_real_coverage.py` run directly, or via the
+now-**disabled** "APIx Collection Cycle" Task Scheduler entry) remains available as a
+fallback/comparison path — it generally gets *better* source coverage than GitHub Actions
+runs (Akasa Air works locally, for instance), at the cost of depending on the local
+machine staying awake and online. See RESTART.md for the operational runbook and how to
+switch back.
+
 - **Source Registry:** Implements a strict permission state machine (`DISCOVERED` $\rightarrow$ `REVIEW_REQUIRED` $\rightarrow$ `APPROVED` $\rightarrow$ `ACTIVE`). Unapproved sources cannot be scheduled.
 - **Circuit Breaker:** Tracks consecutive errors per source. Trips from `CLOSED` to `OPEN` after 5 failures, protecting upstream airline servers and system reliability.
 - **Payload Immutability:** Raw API/HTML responses are saved with SHA-256 hashes in `data/raw/` before parsing. Tamper detection guarantees scientific reproducibility.
