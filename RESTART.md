@@ -5,21 +5,51 @@ the database (`airfare_observatory.db`) and all code are on disk — you just
 need to relaunch the two processes. Run everything below from the project
 root: `C:\Users\cecilia\Downloads\APIx-main\APIx-main`.
 
-**The 4x-daily data collection (06:00/12:00/18:00/23:00 IST) no longer
-depends on the API server at all.** It's a Windows Task Scheduler entry
-("APIx Collection Cycle") that runs independently — it survives the API
-server being down, and Windows itself runs it as soon as possible after a
-missed slot (e.g. the machine was asleep). You don't need to do anything for
-it to keep working after a reboot; it's registered at the OS level. Check its
-history any time with:
+## Where data collection actually happens now
 
-```powershell
-Get-ScheduledTask -TaskName "APIx Collection Cycle" | Get-ScheduledTaskInfo
+**Real-data collection runs on GitHub Actions, not this machine.**
+`.github/workflows/collect.yml` runs the same 4x-daily cycle
+(06:00/12:00/18:00/23:00 IST) on GitHub's own infrastructure and commits the
+updated `airfare_observatory.db` back to `main` — it's completely
+independent of whether this machine, or the local API server, is even on.
+Check its history any time:
+
+```bash
+gh run list --repo AVATAR3905/apixw --workflow="Collect Real Airfare Data"
 ```
 
-(The in-process APScheduler that used to live inside the API server for this
-was found to silently miss runs with no error — see TASKS.md v2.7 changelog
-— so this was moved out to Task Scheduler instead.)
+(Why: the local machine turned out to be unreliable for this — sleep/wake
+cycles, process crashes, and an in-process APScheduler that silently missed
+scheduled runs with no error. See `TASKS.md` v2.7/v2.8 changelog entries for
+the full history. Known tradeoff: GitHub's runner IPs are datacenter
+ranges, which has already fully blocked Akasa Air's carrier-direct feed
+there (robots.txt won't even serve to that IP range) — SpiceJet and the
+Google Flights RPC feed still work fine from GitHub; Ixigo/EaseMyTrip are
+inconsistent. Local collection generally gets better source coverage when
+it does work, which is the tradeoff being made here.)
+
+**This machine just displays GitHub's data — it doesn't collect
+independently anymore.** The local "APIx Collection Cycle" scheduled task is
+**disabled** (not deleted, so it can be re-enabled if you ever want to go
+back to local collection). In its place, a new task, **"APIx GitHub Sync"**,
+runs every 30 minutes: it checks for new commits on GitHub and, only when
+there actually are some, stops the local API server (which holds the DB file
+open), pulls, and restarts it. If nothing's new, it's a no-op and doesn't
+touch the running server. Check its log:
+
+```powershell
+Get-Content "C:\Users\cecilia\Downloads\APIx-main\APIx-main\logs\sync_from_github.log" -Tail 20
+```
+
+or run it manually any time you want the latest data immediately, without
+waiting for the next 30-minute tick:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Users\cecilia\Downloads\APIx-main\APIx-main\scripts\sync_from_github.ps1"
+```
+
+**Both of these Task Scheduler entries survive a reboot automatically** —
+nothing to redo after restarting Windows.
 
 ## 1. Check what's already running
 
@@ -79,9 +109,12 @@ you're using:
   *either one* exits, which has caused accidental full outages before. The
   standalone commands above are more resilient if you ever need to restart
   just one side.
-- If you stop and restart the API server mid-day, it only schedules *future*
-  cron slots from that moment — it won't backfill a collection cycle it
-  missed while down.
 - To stop a server: find its PID with the `netstat` command in step 1, then
   `taskkill //PID <pid> //F` (Bash) or `Stop-Process -Id <pid> -Force`
-  (PowerShell).
+  (PowerShell). The sync task (above) will restart the API server on its own
+  the next time it finds new data, so don't worry about it staying down —
+  just don't be surprised if it comes back up without you doing anything.
+- If you ever want local collection back instead of GitHub Actions:
+  `Enable-ScheduledTask -TaskName "APIx Collection Cycle"` (and consider
+  disabling "APIx GitHub Sync" first, so the two don't fight over the same
+  tracked `airfare_observatory.db`).
