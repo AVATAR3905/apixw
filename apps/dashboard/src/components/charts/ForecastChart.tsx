@@ -20,6 +20,8 @@ export interface ForecastChartDataPoint {
   baseVal: number;
   totalVal?: number;
   isForecast?: boolean;
+  ciLower?: number;
+  ciUpper?: number;
   p10?: number;
   p25?: number;
   p50?: number;
@@ -40,6 +42,7 @@ interface ForecastChartProps {
   yTickFormatter?: (val: number) => string;
   showForecastBands?: boolean;
   showConfidence?: boolean;
+  showHistoricalErrorBand?: boolean;
   title?: string;
   subtitle?: string;
 }
@@ -73,6 +76,7 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
     yTickFormatter,
     showForecastBands = true,
     showConfidence = true,
+    showHistoricalErrorBand = false,
     title,
     subtitle,
   } = props;
@@ -98,6 +102,7 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
   const gradientId = `area-gradient-${color}-${yKey}`;
   const forecastGradientId = `forecast-gradient-${color}-${yKey}`;
   const ciGradientId = `ci-gradient-${color}-${yKey}`;
+  const histCiGradientId = `hist-ci-gradient-${color}-${yKey}`;
 
   // Split data
   const historicalData = data.filter((d) => !d.isForecast);
@@ -153,6 +158,11 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
                 <stop offset="0%" stopColor="rgba(249, 115, 22, 0.12)" />
                 <stop offset="100%" stopColor="rgba(249, 115, 22, 0.0)" />
               </linearGradient>
+              {/* Historical 95% CI gradient */}
+              <linearGradient id={histCiGradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(6, 182, 212, 0.16)" />
+                <stop offset="100%" stopColor="rgba(6, 182, 212, 0.0)" />
+              </linearGradient>
             </defs>
 
             <CartesianGrid
@@ -192,6 +202,8 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
                   const p10 = item.p10;
                   const p90 = item.p90;
                   const confidence = item.modelConfidence;
+                  const ciLower = item.ciLower;
+                  const ciUpper = item.ciUpper;
                   return (
                     <div className="rounded-xl border border-border bg-card p-3 shadow-xl font-sans text-xs">
                       <div className="flex items-center gap-2 mb-1">
@@ -206,6 +218,11 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: stroke }} />
                         <span>{valuePrefix}{val?.toFixed(1) || "—"}</span>
                       </div>
+                      {!isForecast && ciLower !== undefined && ciUpper !== undefined && (
+                        <div className="text-xs text-muted-foreground mt-2 font-mono flex items-center gap-2">
+                          <span className="text-cyan-400">95% CI: {valuePrefix}{ciLower.toFixed(2)} – {valuePrefix}{ciUpper.toFixed(2)}</span>
+                        </div>
+                      )}
                       {showForecastBands && isForecast && p10 !== undefined && p90 !== undefined && (
                         <div className="text-xs text-muted-foreground mt-2 font-mono flex items-center gap-2">
                           <span className="text-emerald-400">P10: {valuePrefix}{p10.toFixed(1)}</span>
@@ -244,6 +261,27 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
                   stroke="none"
                   fill="#0f172a"
                   data={forecastWithBands}
+                />
+              </>
+            )}
+
+            {/* Historical 95% Confidence Interval Band (observed, bootstrap) */}
+            {showHistoricalErrorBand && historicalData.some((d) => d.ciLower != null && d.ciUpper != null) && (
+              <>
+                <Area
+                  type="monotone"
+                  dataKey="ciUpper"
+                  stroke="none"
+                  fillOpacity={1}
+                  fill={`url(#${histCiGradientId})`}
+                  data={historicalData}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="ciLower"
+                  stroke="none"
+                  fill="#0f172a"
+                  data={historicalData}
                 />
               </>
             )}
@@ -330,6 +368,7 @@ export function ForecastChart(props: ForecastChartProps): JSX.Element {
                 if (value === yKey) return "Historical";
                 if (value === "p50") return "Forecast (median)";
                 if (value === "ci") return "80% CI";
+                if (value === "ciUpper" || value === "ciLower") return " ";
                 return value;
               }}
             />

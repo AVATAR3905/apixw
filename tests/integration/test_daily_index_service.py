@@ -39,7 +39,7 @@ def test_daily_index_calculator_execution():
                 r
                 for r in records
                 if r.index_series == "BASE_FARE"
-                and r.index_type in ("HEADLINE_T15", "HEADLINE_T14")
+                and r.index_type in ("HEADLINE_T15",)
                 and r.route_id is None
             ),
             None,
@@ -51,6 +51,21 @@ def test_daily_index_calculator_execution():
         assert headline_base.lead_time_days in (14, 15)
         assert headline_base.coverage_rate >= 80.0
         assert headline_base.is_low_coverage is False
+
+        # NSO-standard variance estimation is attached to every national record.
+        # Default estimator is JACKKNIFE (deterministic SE, no CI distribution);
+        # BOOTSTRAP additionally produces percentile CI bounds + replication count.
+        assert headline_base.standard_error is not None
+        assert headline_base.variance_method is not None
+        if headline_base.variance_method.startswith("BOOTSTRAP"):
+            assert headline_base.index_ci_lower is not None
+            assert headline_base.index_ci_upper is not None
+            assert headline_base.bootstrap_replications is not None
+            # CI is well-formed around the point estimate
+            assert headline_base.index_ci_lower <= headline_base.index_value
+            assert headline_base.index_ci_upper >= headline_base.index_value
+        else:
+            assert headline_base.variance_method == "JACKKNIFE_LEAVE_ONE_ROUTE_OUT"
 
         # Verify sub-indices
         sub_t1 = next(
@@ -65,6 +80,8 @@ def test_daily_index_calculator_execution():
             r for r in records if r.index_type == "ROUTE_LEVEL"
         ]
         assert len(route_records) >= 10
+        # Route-level indices also carry bootstrap SE / CI
+        assert all(r.standard_error is not None for r in route_records if r.lead_time_days in (14, 15))
 
     finally:
         db.close()
@@ -141,7 +158,7 @@ def test_daily_index_deltas_calculation():
             (
                 r
                 for r in day2_records
-                if r.index_type in ("HEADLINE_T15", "HEADLINE_T14")
+                if r.index_type in ("HEADLINE_T15",)
                 and r.route_id is None
             ),
             None,

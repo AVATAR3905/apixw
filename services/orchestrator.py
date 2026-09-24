@@ -90,7 +90,7 @@ class APIXOrchestrator:
                 routes = [r.route_code for r in db.query(Route).filter(Route.active).all()]
 
             if advance_days is None:
-                advance_days = self.config.get("collection", {}).get("carrier_direct", {}).get("advance_days", [1, 7, 14, 15, 30, 45])
+                advance_days = self.config.get("collection", {}).get("carrier_direct", {}).get("advance_days", [1, 7, 15, 30, 45])
 
             if search_date is None:
                 search_date = datetime.date.today()
@@ -107,8 +107,9 @@ class APIXOrchestrator:
                             search_date=search_date,
                             db=db,
                         )
-                        total_quotes += result.get("total_quotes_collected", 0)
-                        logger.info(f"  Collected {result['total_quotes_collected']} quotes")
+                        collected = result.get("total_quotes_collected", 0)
+                        total_quotes += collected
+                        logger.info(f"  Collected {collected} quotes")
                     except Exception as e:
                         error_msg = f"Collection failed for {route_code} T+{adv_days}: {e}"
                         logger.error(error_msg)

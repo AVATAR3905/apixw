@@ -56,6 +56,17 @@ SCHEMA_ADDITIONS = {
             "DEFAULT 'NETWORK'"
         )
     },
+    "index_values": {
+        "standard_error": "ALTER TABLE index_values ADD COLUMN standard_error FLOAT",
+        "index_ci_lower": "ALTER TABLE index_values ADD COLUMN index_ci_lower FLOAT",
+        "index_ci_upper": "ALTER TABLE index_values ADD COLUMN index_ci_upper FLOAT",
+        "bootstrap_replications": (
+            "ALTER TABLE index_values ADD COLUMN bootstrap_replications INTEGER"
+        ),
+        "variance_method": (
+            "ALTER TABLE index_values ADD COLUMN variance_method VARCHAR(40)"
+        ),
+    },
 }
 
 

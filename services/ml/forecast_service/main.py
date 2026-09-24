@@ -3,7 +3,6 @@
 Google Research's 200M-parameter time-series foundation model for zero-shot forecasting.
 Runs as standalone HTTP service for the APIX ensemble.
 """
-
 import logging
 import os
 from dataclasses import dataclass
@@ -14,6 +13,8 @@ import numpy as np
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+from packages.shared.time_utils import utcnow
 
 # TimesFM import (lazy-loaded to avoid startup issues)
 _timesfm_model = None
@@ -189,7 +190,7 @@ async def forecast(request: ForecastRequest):
             points=points,
             model_version="timesfm-2.5-500m-jax",
             ensemble_weights={"timesfm": 1.0},
-            generated_at=datetime.utcnow().isoformat() + "Z",
+            generated_at=utcnow().isoformat() + "Z",
         )
 
         logger.info(f"Generated forecast: {request.series}/{request.index_type} for {forecast_horizon} days")

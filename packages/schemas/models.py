@@ -1,7 +1,5 @@
 """SQLAlchemy Declarative Models for the India Airfare Price Observatory (v2.0)."""
 
-import datetime
-
 from sqlalchemy import (
     Boolean,
     Column,
@@ -15,6 +13,8 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.orm import declarative_base, relationship
+
+from packages.shared.time_utils import utcnow
 
 Base = declarative_base()
 
@@ -41,9 +41,9 @@ class Source(Base):
     enabled = Column(Boolean, default=False)
     health_status = Column(String(50), default="HEALTHY")  # HEALTHY, WARNING, DEGRADED, DOWN
     last_reviewed_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(
-        DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -65,7 +65,7 @@ class Route(Base):
     route_code = Column(String(20), unique=True, nullable=False)  # DEL-BOM
     corridor_type = Column(String(50), default="METRO_TRUNK")  # METRO_TRUNK, REGIONAL_THIN
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     observations = relationship("FareObservation", back_populates="route")
@@ -84,7 +84,7 @@ class Airline(Base):
     name = Column(String(100), nullable=False)
     is_scheduled = Column(Boolean, default=True)
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     observations = relationship("FareObservation", back_populates="airline")
@@ -101,7 +101,7 @@ class RawPayload(Base):
     payload_uri = Column(String(255), nullable=False)
     payload_hash = Column(String(64), nullable=False, index=True)  # SHA-256 hex
     content_type = Column(String(50), default="application/json")
-    captured_at = Column(DateTime, default=datetime.datetime.utcnow)
+    captured_at = Column(DateTime, default=utcnow)
 
     # Relationships
     source = relationship("Source", back_populates="raw_payloads")
@@ -159,7 +159,7 @@ class FareObservation(Base):
     schema_version = Column(String(20), default="2.0.0")
     raw_payload_id = Column(Integer, ForeignKey("raw_payloads.id"), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     source = relationship("Source", back_populates="observations")
@@ -187,7 +187,7 @@ class RouteWeight(Base):
     methodology_version = Column(String(50), default="APIX-2.0")
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     route = relationship("Route", back_populates="weights")
@@ -210,7 +210,7 @@ class CollectionJob(Base):
     completed_at = Column(DateTime, nullable=True)
     error_code = Column(String(50), nullable=True)
     error_message = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     # Relationships
     route = relationship("Route", back_populates="collection_jobs")
@@ -224,6 +224,9 @@ class IndexValue(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     index_series = Column(String(30), default="BASE_FARE", nullable=False)  # BASE_FARE, TOTAL_PRICE
+    series_type = Column(
+        String(20), default="HEADLINE", nullable=False, index=True
+    )  # HEADLINE (all travel dates) | CORE (volatility-guarded)
     index_type = Column(
         String(30), default="HEADLINE_T15", nullable=False
     )  # HEADLINE_T15, SUB_T1, SUB_T7, SUB_T15, SUB_T30, SUB_T45, ROUTE_LEVEL
@@ -245,7 +248,7 @@ class IndexValue(Base):
 
     methodology_version = Column(String(50), default="APIX-2.0")
     weight_version = Column(String(50), default="DGCA_2026_V1")
-    calculated_at = Column(DateTime, default=datetime.datetime.utcnow)
+    calculated_at = Column(DateTime, default=utcnow)
 
     # Quality & governance fields (Skytra/FAX methodology)
     index_status = Column(
@@ -261,10 +264,21 @@ class IndexValue(Base):
     spot_window_start = Column(Date, nullable=True)  # BLS-style spot window
     spot_window_end = Column(Date, nullable=True)
 
+    # Variance estimation (NSO-standard uncertainty around the point estimate).
+    # Filled by bootstrap / jackknife resampling of the elementary route-horizon
+    # cells so every published index value carries a standard error and CI.
+    standard_error = Column(Float, nullable=True)  # Bootstrap SE of index_value
+    index_ci_lower = Column(Float, nullable=True)  # Percentile-CI lower bound
+    index_ci_upper = Column(Float, nullable=True)  # Percentile-CI upper bound
+    bootstrap_replications = Column(Integer, nullable=True)  # Resample count
+    variance_method = Column(
+        String(40), nullable=True
+    )  # BOOTSTRAP_PERCENTILE_95 / JACKKNIFE_LEAVE_ONE_ROUTE_OUT
+
     # Relationships
     route = relationship("Route", back_populates="index_values")
 
-    __table_args__ = (Index("idx_index_lookup", "index_series", "index_type", "period_start"),)
+    __table_args__ = (Index("idx_index_lookup", "index_series", "index_type", "series_type", "period_start"),)
 
 
 class BenchmarkValue(Base):
@@ -279,7 +293,7 @@ class BenchmarkValue(Base):
     base_year = Column(String(20), default="2012=100")
     source = Column(String(100), default="MoSPI / NSO / eSankhyiki")
     source_version = Column(String(50), default="CPI_2026_M")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class ValidationResult(Base):
@@ -300,11 +314,17 @@ class ValidationResult(Base):
     prototype_series_version = Column(String(50), default="APIX-2.0")
     benchmark_version = Column(String(50), default="MoSPI_CPI_AIRFARE")
     methodology_notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class DiscrepancyAudit(Base):
-    """Cross-feed validation audit comparing carrier direct website quotes against RPC aggregator feed."""
+    """Cross-feed and source-pair validation audits.
+
+    Two audit modes are persisted into this table:
+    1. CROSS_FEED (legacy): carrier direct website quotes vs RPC aggregator feed.
+    2. OTA_SOURCE_PAIR (Phase 2): pairwise markup of any source (OTA vs OTA or
+       OTA vs carrier-direct reference) for the same physical flight entity.
+    """
 
     __tablename__ = "discrepancy_audits"
 
@@ -317,18 +337,112 @@ class DiscrepancyAudit(Base):
 
     carrier_direct_price = Column(Float, nullable=True)
     rpc_validator_price = Column(Float, nullable=True)
-    discrepancy_amount = Column(Float, default=0.0)  # rpc - direct
-    discrepancy_pct = Column(Float, default=0.0)  # |rpc - direct| / direct * 100
+    discrepancy_amount = Column(Float, default=0.0)  # reference - comparator
+    discrepancy_pct = Column(Float, default=0.0)  # |delta| / reference * 100
     validation_status = Column(
         String(50), default="EXACT_PARITY"
-    )  # EXACT_PARITY, CARRIER_CHEAPER, AGGREGATOR_MARKUP, FALLBACK_RPC_USED
+    )  # EXACT_PARITY, AGGREGATOR_MARKUP, AGGREGATOR_DISCOUNT, FALLBACK_RPC_USED, DIRECT_ONLY
+
+    # Source-pair markup audit fields (Phase 2). Null for legacy CROSS_FEED rows.
+    audit_type = Column(
+        String(30), default="CROSS_FEED", nullable=False
+    )  # CROSS_FEED, OTA_SOURCE_PAIR
+    source_a_id = Column(Integer, nullable=True)  # reference source (cheapest observed)
+    source_b_id = Column(Integer, nullable=True)  # comparator source
+    source_a_name = Column(String(100), nullable=True)
+    source_b_name = Column(String(100), nullable=True)
+    feed_type_a = Column(String(30), nullable=True)
+    feed_type_b = Column(String(30), nullable=True)
+    price_a = Column(Float, nullable=True)  # reference price (INR)
+    price_b = Column(Float, nullable=True)  # comparator price (INR)
+    markup_amount = Column(Float, nullable=True)  # price_b - price_a
+    markup_pct = Column(Float, nullable=True)  # (price_b - price_a) / price_a * 100
 
     notes = Column(String(255), nullable=True)
-    verified_at = Column(DateTime, default=datetime.datetime.utcnow)
+    verified_at = Column(DateTime, default=utcnow)
 
     # Relationships
     route = relationship("Route")
     airline = relationship("Airline")
+
+    __table_args__ = (
+        Index("idx_audit_type_travel", "audit_type", "travel_date"),
+    )
+
+
+class SourceCorrelation(Base):
+    """Rolling-window Pearson correlation between feed cohorts (Phase 5).
+
+    Tracks whether OTA_AGGREGATOR observations track the authoritative
+    carrier-direct reference per route/horizon over a trailing window, so a
+    divergence (falling r) can be escalated as a data-quality alert.
+    """
+
+    __tablename__ = "source_correlations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_start = Column(Date, nullable=False)
+    period_end = Column(Date, nullable=False)
+    route_id = Column(Integer, ForeignKey("routes.id"), nullable=True)
+    horizon_days = Column(Integer, nullable=False)
+    correlation_type = Column(
+        String(40), default="OTA_VS_CARRIER_DIRECT", nullable=False
+    )  # OTA_VS_CARRIER_DIRECT, OTA_ENSEMBLE_VS_HEADLINE
+    source_a = Column(String(100), nullable=False)  # descriptive series name
+    source_b = Column(String(100), nullable=False)
+    pearson_r = Column(Float, nullable=False)
+    sample_size = Column(Integer, default=0)
+    notes = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=utcnow)
+
+    # Relationships
+    route = relationship("Route")
+
+    __table_args__ = (
+        Index("idx_corr_lookup", "correlation_type", "period_end", "route_id"),
+    )
+
+
+class AnomalyEvent(Base):
+    """Persisted price anomaly / spike alerts surfaced via the detector pipeline.
+
+    Each row is a single point-in-time anomaly hit on a national index series
+    (or route-level series when route_id is set) and tracks escalation status
+    so operations can triage and resolve alerts.
+    """
+
+    __tablename__ = "anomaly_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    series = Column(String(20), default="BASE_FARE", nullable=False)
+    series_type = Column(String(20), default="HEADLINE", nullable=False)
+    route_id = Column(Integer, ForeignKey("routes.id"), nullable=True)
+
+    observation_date = Column(Date, nullable=False)
+    anomaly_type = Column(
+        String(40), default="PRICE_OUTLIER", nullable=False
+    )  # PRICE_OUTLIER, INDEX_SPIKE, FEED_DIVERGENCE
+    severity = Column(
+        String(20), default="LOW", nullable=False
+    )  # LOW, MODERATE, SEVERE
+
+    z_score = Column(Float, nullable=True)
+    reference_median = Column(Float, nullable=True)
+    detected_value = Column(Float, nullable=True)
+    reference_values_sample = Column(String(255), nullable=True)
+    notes = Column(String(255), nullable=True)
+
+    status = Column(
+        String(20), default="OPEN", nullable=False
+    )  # OPEN, ESCALATED, RESOLVED
+    detected_at = Column(DateTime, default=utcnow)
+    resolved_at = Column(DateTime, nullable=True)
+
+    route = relationship("Route")
+
+    __table_args__ = (
+        Index("idx_anomaly_lookup", "observation_date", "series", "status"),
+    )
 
 
 class ATFPrice(Base):
@@ -341,7 +455,7 @@ class ATFPrice(Base):
     date = Column(Date, nullable=False, index=True)
     price_per_kl = Column(Float, nullable=False)  # INR per kilo litre (kL)
     source = Column(String(50), default="IOCL / PPAC")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class ATFTaxRate(Base):
@@ -355,7 +469,7 @@ class ATFTaxRate(Base):
     tax_type = Column(String(50), nullable=False)  # CENTRAL_EXCISE, STATE_VAT
     rate = Column(Float, nullable=False)  # Percentage rate
     source = Column(String(50), default="PPAC")
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class MethodologyVersion(Base):
@@ -368,14 +482,42 @@ class MethodologyVersion(Base):
     name = Column(String(100), nullable=False)
     base_period = Column(String(50), default="2026-08-01")
     anchor_lead_time = Column(String(20), default="T+15")
-    price_estimator = Column(String(50), default="LOWEST_ECONOMY_CARRIER_MEDIAN")
+    price_estimator = Column(String(50), default="LOWEST_ECONOMY_JEVONS_GEOMETRIC_MEAN")
     missing_data_method = Column(String(50), default="EXCLUDE_SOLD_OUT_RECORD_COVERAGE")
     outlier_method = Column(String(50), default="ROBUST_MEDIAN_FILTER")
     weight_method = Column(String(50), default="DGCA_BIDIRECTIONAL_PASSENGER_VOLUME")
     formula = Column(Text, nullable=False)
     effective_from = Column(Date, nullable=False)
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class DGCAMonthlyFare(Base):
+    """Monthly average fares per domestic sector from DGCA scheduled traffic reports.
+
+    DGCA publishes `Air Transport Statistics` (table 6 / 7) with sector-wise
+    average fare data.  This table stores the official published fare series so
+    that the Observatory can benchmark its high-frequency prototype index against
+    the authoritative government reference.
+    """
+
+    __tablename__ = "dgca_monthly_fares"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    route_id = Column(Integer, ForeignKey("routes.id"), nullable=False)
+    period = Column(String(20), nullable=False, index=True)  # YYYY-MM
+    sector_type = Column(String(20), default="METRO_TRUNK")  # METRO_TRUNK, REGIONAL_THIN, ALL
+    average_fare = Column(Float, nullable=False)  # INR one-way average economy
+    total_passengers = Column(Float, nullable=True)  # boarded pax
+    source = Column(String(100), default="DGCA Air Transport Statistics")
+    source_version = Column(String(50), default="DGCA_ATS_2026")
+    created_at = Column(DateTime, default=utcnow)
+
+    route = relationship("Route")
+
+    __table_args__ = (
+        Index("idx_dgca_fare_lookup", "route_id", "period", "sector_type"),
+    )
 
 
 class CarrierIndex(Base):
@@ -393,7 +535,7 @@ class CarrierIndex(Base):
     weekly_change_pct = Column(Float, nullable=True)
     monthly_change_pct = Column(Float, nullable=True)
     routes_covered = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
 
 class ForecastSnapshot(Base):
@@ -402,7 +544,7 @@ class ForecastSnapshot(Base):
     __tablename__ = "forecast_snapshots"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    generated_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
+    generated_at = Column(DateTime, default=utcnow, index=True)
     series = Column(String(30), default="BASE_FARE", nullable=False)  # BASE_FARE, TOTAL_PRICE
     index_type = Column(String(30), nullable=False)  # HEADLINE_T15, SUB_T1, ...
     forecast_date = Column(Date, nullable=False, index=True)  # last observed index date
@@ -444,6 +586,6 @@ class RouteVolatilityRecord(Base):
         String(30), default="CALM"
     )  # CALM, MODERATE, HIGH_VOLATILITY, SURGE_ALERT
     sample_size = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
     route = relationship("Route")

@@ -8,6 +8,7 @@ Functions as:
 import datetime
 import hashlib
 import json
+import logging
 import os
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,7 @@ from fast_flights import FlightQuery, Passengers, create_query, get_flights
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import RawPayload, Source
+from packages.shared.time_utils import utcnow
 from services.collectors.circuit_breaker import (
     CircuitBreaker,
     CollectorErrorCode,
@@ -22,6 +24,8 @@ from services.collectors.circuit_breaker import (
 )
 from services.collectors.drift_detector import FareSchemaDriftDetector, record_drift
 from services.collectors.response_cache import get_fare_cache
+
+logger = logging.getLogger(__name__)
 
 
 class RealFlightRPCConnector:
@@ -56,6 +60,20 @@ class RealFlightRPCConnector:
 
         travel_date = search_date + datetime.timedelta(days=advance_days)
         travel_date_str = travel_date.isoformat()
+
+        from packages.shared.config import settings
+
+        if settings.SCRAPE_MODE == "calibrated":
+            # Deterministic offline behaviour: no network hit, no aggregator
+            # markup audit possible — return nothing and let the reconciliation
+            # layer fall back to the calibrated carrier baseline (DIRECT_ONLY).
+            # Under "live" and "hybrid" modes the RPC feed runs live so the
+            # parity table shows real aggregator prices vs the carrier baseline.
+            logger.info(
+                "SCRAPE_MODE=%s: RPC network feed skipped for %s->%s",
+                settings.SCRAPE_MODE, origin_airport, destination_airport,
+            )
+            return []
 
         def _fetch():
             query = create_query(
@@ -183,7 +201,7 @@ class RealFlightRPCConnector:
                     payload_uri=filepath,
                     payload_hash=payload_hash,
                     content_type="application/json",
-                    captured_at=datetime.datetime.now(datetime.UTC),
+                    captured_at=utcnow(),
                 )
                 db.add(rp)
                 db.commit()

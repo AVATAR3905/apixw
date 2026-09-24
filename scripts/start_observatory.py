@@ -14,19 +14,43 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DASHBOARD_DIR = os.path.join(PROJECT_ROOT, "apps", "dashboard")
 
 
+def _lan_ip() -> str:
+    """Returns the primary LAN IPv4 address of this machine ('' if unknown)."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        return ip or "127.0.0.1"
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
 def print_banner():
+    lan = _lan_ip()
     print("\n" + "=" * 80)
     print("      INDIA AIRFARE PRICE OBSERVATORY — UNIFIED PLATFORM LAUNCHER      ")
     print("      Official High-Frequency Aviation Price Index for MoSPI / NSO     ")
     print("=" * 80)
     print(" [1] FastAPI Backend:       http://localhost:8000")
+    if lan:
+        print(" [1] Backend (network):     http://{}:8000".format(lan))
     print("     - OpenAPI Specs:       http://localhost:8000/docs")
     print("     - Redoc Documentation: http://localhost:8000/redoc")
     print("     - Background Cron:     Active (Lifespan Managed @ 18:00 IST)")
     print(" [2] Next.js Dashboard:     http://localhost:3000")
+    if lan:
+        print("     - Dashboard (network):  http://{}:3000".format(lan))
     print("     - Live Data Mode:      100% Dynamic Direct Database Queries")
     print("     - Active Corridors:    10 DGCA-Weighted Routes")
     print("=" * 80)
+    print(" Open the dashboard URL in a browser to view it.")
     print(" Press Ctrl+C at any time to gracefully terminate both services.\n")
 
 

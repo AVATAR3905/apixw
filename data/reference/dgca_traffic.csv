@@ -1,21 +1,21 @@
 period,origin_airport,destination_airport,passenger_volume,carrier_count,source_publication
-2025-Q4,DEL,BOM,1650000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BOM,DEL,1600000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,BLR,1270000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BLR,DEL,1240000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BOM,BLR,1080000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BLR,BOM,1060000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,CCU,930000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,CCU,DEL,920000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,HYD,870000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,HYD,DEL,860000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BOM,MAA,770000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,MAA,BOM,750000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,BLR,HYD,700000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,HYD,BLR,690000,5,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,MAA,670000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,MAA,DEL,650000,4,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,IXS,520000,2,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,IXS,DEL,500000,2,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DEL,DHM,470000,2,DGCA Monthly Domestic Passenger Traffic Report
-2025-Q4,DHM,DEL,450000,2,DGCA Monthly Domestic Passenger Traffic Report
+TTM-2026-07,DEL,BOM,3397825.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BOM,DEL,3380512.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,BLR,2441621.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BLR,DEL,2435537.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BOM,BLR,2096798.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BLR,BOM,2032367.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,CCU,1474451.00,4,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,CCU,DEL,1438357.00,4,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,HYD,1552164.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,HYD,DEL,1553302.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BOM,MAA,1131902.00,4,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,MAA,BOM,1087165.00,4,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,BLR,HYD,1091837.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,HYD,BLR,1077570.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,MAA,1090062.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,MAA,DEL,1094263.00,5,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,IXS,8602.00,2,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,IXS,DEL,8008.00,2,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DEL,DHM,73438.00,2,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"
+TTM-2026-07,DHM,DEL,57767.00,2,"DGCA Monthly Domestic Air Transport Statistics (city-pair traffic), trailing 12 months Aug 2025-Jul 2026, aggregated via github.com/Vonter/india-aviation-traffic from dgca.gov.in publications"

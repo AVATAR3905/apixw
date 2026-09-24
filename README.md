@@ -4,8 +4,9 @@
 [![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-2.0.0-009688.svg)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Tests](https://img.shields.io/badge/Tests-156%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-200%20Passing-brightgreen.svg)]()
 [![Methodology](https://img.shields.io/badge/Methodology-APIX--2.0-847dff.svg)]()
+[![Governance](https://img.shields.io/badge/Governance-Intelligence-FF6B35.svg)]()
 
 ---
 
@@ -16,13 +17,18 @@ The **India Airfare Price Observatory** is an official production-grade statisti
 Unlike traditional retrospective monthly surveys, this observatory captures **high-frequency, authentic domestic airfare quotes** directly from airline booking systems across **five advance purchase horizons** ($T+1, T+7, T+15, T+30, T+45$), anchoring its national headline index at **$T+15$** with rigorous **fare-mix confounding protection** (lowest available basic economy fare per carrier).
 
 ### Key Architectural & Methodological Guarantees
-1. **Fare-Mix Protection:** Extracts lowest basic economy fare per scheduled carrier before cross-carrier median aggregation. An airline adding expensive flexi/business seats causes **0% artificial inflation bias**.
-2. **Unpooled Lead Times:** Headline index is anchored at **$T+15$** (2-week advance purchase). Different horizons ($T+1$ vs $T+45$) are never averaged together.
-3. **Dual Price Series:** Provides both **Base Fare Index** (carrier behavioral pricing) and **Total Price Index** (consumer out-of-pocket).
-4. **DGCA Passenger Volume Basket:** Weights 10 representative corridors (8 Metro Trunks + 2 Regional Thin Corridors: `DEL-IXS`, `DEL-DHM`) derived from official DGCA city-pair domestic traffic.
-5. **Directional Co-Movement Framing:** Evaluates directional co-movement ($r = 0.997$, 100% directional accuracy) alongside official retrospective MoSPI CPI benchmarks.
-6. **ATF Jet Fuel Context:** Contextual overlay (~38% operating cost share) with strict non-causal disclosures accounting for 12–18 month fuel hedging cycles.
-7. **Forecast & Anomaly Extensions:** 28-day (past + future) ensemble fare forecasts (TimesFM 2.5 + LightGBM conformal + STL/ARIMA) and corridor surge/volatility alerts exposed via `/api/v1/forecast/history-and-forecast` and `/api/v1/analytics/volatility`. Every forecast is snapshotted and backtested against realized index values via `/api/v1/forecast/accuracy` (MAE/RMSE/MAPE, P50 hit rate, interval coverage).
+1. **Fare-Mix Protection:** Extracts lowest basic economy fare per scheduled carrier before cross-carrier aggregation. An airline adding expensive flexi/business seats causes **0% artificial inflation bias**.
+2. **Hybrid Laspeyres–Jevons Formula (v2.1):** Jevons geometric mean elementary aggregates per route–horizon cell, combined arithmetic-Laspeyres across the DGCA-weighted basket (IMF CPI Manual 2020 Ch.10; UK ONS guidance). See [METHODOLOGY.md](METHODOLOGY.md).
+3. **Dual-Series Architecture (v2.1):** **HEADLINE** (raw all-feed Laspeyres, the market's fastest readout) and **CORE** (festival/peak-exclusion-guarded continuity series with auto re-anchoring) — both served from `/api/v1/index?series_type=HEADLINE|CORE` and the CSV exports.
+4. **Unpooled Lead Times:** Headline index is anchored at **$T+15$** (2-week advance purchase). Different horizons ($T+1$ vs $T+45$) are never averaged together. Justified in [docs/T15_anchor_analysis.md](docs/T15_anchor_analysis.md).
+5. **Dual Price Series:** Provides both **Base Fare Index** (carrier behavioral pricing) and **Total Price Index** (consumer out-of-pocket).
+6. **DGCA Passenger Volume Basket:** Weights 10 representative corridors (8 Metro Trunks + 2 Regional Thin Corridors: `DEL-IXS`, `DEL-DHM`) derived from official DGCA city-pair domestic traffic; cross-checked monthly against the DGCA fare benchmark (`/api/v1/validation/dgca`).
+7. **Multi-OTA Governance (v2.1):** Six OTAs (MakeMyTrip, Ixigo, EaseMyTrip, Yatra, Cleartrip, Skyscanner) are feed-tagged (`OTA_AGGREGATOR`) and audited against the carrier-direct reference via source-pair markup audits (`/api/v1/validation/source-pair`) and rolling feed-cohort correlations (`/api/v1/validation/source-correlation`).
+8. **Anomaly Detection & Confidence (v2.1):** IQR + MAD z-score detector with severity classification and escalation persists `anomaly_events` (`/api/v1/analytics/anomalies`); every live index read carries `confidence_score` / `confidence_band` / `outlier_count`.
+9. **Directional Co-Movement Framing:** Evaluates directional co-movement ($r = 0.997$, 100% directional accuracy) alongside official retrospective MoSPI CPI benchmarks.
+10. **ATF Jet Fuel Context:** Contextual overlay (~38% operating cost share) with strict non-causal disclosures accounting for 12–18 month fuel hedging cycles.
+11. **Forecast & Anomaly Extensions:** 28-day (past + future) ensemble fare forecasts (TimesFM 2.5 + LightGBM conformal + STL/ARIMA) and corridor surge/volatility alerts exposed via `/api/v1/forecast/history-and-forecast` and `/api/v1/analytics/volatility`. Every forecast is snapshotted and backtested against realized index values via `/api/v1/forecast/accuracy` (MAE/RMSE/MAPE, P50 hit rate, interval coverage).
+12. **Governance & Policy Intelligence (v2.2):** A dedicated RBI/CCI/MoCA policy layer — Transient-vs-Structural elevation classifier (`/analytics/policy-signal`), Billion-Prices-style lead-lag vs MoSPI CPI (`/analytics/leading-indicator`), explainable anomaly alerts (`/analytics/alerts`), carrier HHI concentration (CCI, `/analytics/concentration`), intraday volatility + best-time-to-book (`/analytics/intraday-volatility`), scarcity-corrected Availability-Adjusted index (`/analytics/availability-adjusted`), and the UDAN affordability monitor (`/analytics/udan`). See [TASKS.md](TASKS.md).
 
 ---
 
@@ -81,11 +87,14 @@ npm run start
 ## 🧪 Automated Testing & Verification
 
 ```bash
-# Run all 156 unit, statistical, and integration tests
+# Run all 200 unit, statistical, and integration tests
 pytest tests/ -q
 
 # Run live dual-feed collection runner
 python -m services.collectors.dual_feed_runner --route DEL-BOM --horizon 7
+
+# New frontend dashboard (served by FastAPI at /ui — no Node needed)
+#  open http://localhost:8000/ui   (adapter router apps/api/routers/apix_ui.py)
 ```
 
 ---
@@ -93,13 +102,17 @@ python -m services.collectors.dual_feed_runner --route DEL-BOM --horizon 7
 ## 📂 Documentation Sitemap
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Production 8-layer system architecture & data pipeline flow.
-- [METHODOLOGY.md](METHODOLOGY.md) — Mathematical Laspeyres formulation, fare-mix defense, and DGCA weights.
+- [METHODOLOGY.md](METHODOLOGY.md) — Hybrid Laspeyres–Jevons formulation, fare-mix defense, dual-series CORE, and DGCA weights.
 - [DATA_MODEL.md](DATA_MODEL.md) — Database schema, TimescaleDB hypertable layout, and entity relationships.
 - [SOURCES.md](SOURCES.md) — Source registry, legal compliance framework, and circuit breaker taxonomy.
 - [PRD.md](PRD.md) — Product requirements specification.
-- [TASKS.md](TASKS.md) — Phased implementation roadmap & task tracker.
+- [TASKS.md](TASKS.md) — Phased implementation roadmap & task tracker (incl. the APIX-2.1 Statistical Rigor & APIX-2.2 Governance & Policy Intelligence workstreams).
 - [RESEARCH.md](RESEARCH.md) — Living research: index methodology benchmarks, competitor landscape, academic literature, scraping/anti-bot & legal landscape, India regulatory context, USP & roadmap, with all source links.
-- [DEMO.md](DEMO.md) — 6-minute SIH judge demonstration script.
+- [DEMO.md](DEMO.md) — 6-minute SIH judge demonstration script (incl. new `/ui` frontend + OCR/VLM proof blocks + Governance & Policy Intelligence demo blocks).
+- [docs/SCRAPING_OCR_VLM.md](docs/SCRAPING_OCR_VLM.md) — Scraping, OCR & VLM pipeline guide + presentation runbook.
+- [docs/SCRIPTS.md](docs/SCRIPTS.md) — Reference for every runnable script & env var.
+- [docs/T15_anchor_analysis.md](docs/T15_anchor_analysis.md) — Empirical justification for the T+15 headline anchor.
+- [docs/architecture.md](docs/architecture.md) / [docs/architecture.png](docs/architecture.png) — rendered architecture diagram.
 
 ---
 

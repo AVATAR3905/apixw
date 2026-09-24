@@ -106,8 +106,10 @@ class _PaddleOCRVLBackend:
 class VLMService:
     """Registry of lazy VLM backends for structured field extraction."""
 
-    def __init__(self, prefer: str = "paddleocr_vl"):
-        self.prefer = prefer
+    def __init__(self, prefer: str = ""):
+        import os
+
+        self.prefer = prefer or os.environ.get("EXTRACTION_VLM_BACKEND", "paddleocr_vl")
         self.backends: Dict[str, Callable[..., Any]] = {
             "paddleocr_vl": self._paddleocr_vl,
             "openrouter": self._openrouter,
@@ -130,11 +132,14 @@ class VLMService:
     @staticmethod
     def _openrouter():
         try:
-            from services.ai.openrouter_client import OpenRouterClient  # type: ignore
+            from packages.ai.openrouter_vision import OpenRouterVisionBackend
 
-            return OpenRouterClient
+            backend = OpenRouterVisionBackend()
+            if not backend.api_key:
+                raise VLMNotConfigured("OPENROUTER_API_KEY is not configured.")
+            return backend
         except ImportError as e:
-            raise VLMNotConfigured("OpenRouter client unavailable.") from e
+            raise VLMNotConfigured("OpenRouter vision backend unavailable.") from e
 
     def available_backends(self) -> List[str]:
         out = []

@@ -1,7 +1,6 @@
 """MoSPI CPI Benchmark Ingestion, Frequency Matching & Directional Co-Movement Engine (PRD Section 32, 33, 47)."""
 
 import csv
-import datetime
 import os
 from typing import Any, Dict, List
 
@@ -10,6 +9,7 @@ from scipy.stats import pearsonr
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import BenchmarkValue
+from packages.shared.time_utils import utcnow
 
 
 class BenchmarkMatcherService:
@@ -18,7 +18,10 @@ class BenchmarkMatcherService:
     METHODOLOGICAL_DISCLOSURE = (
         "Directional co-movement analysis. The prototype measures high-frequency forward-looking "
         "search-date quotes across five horizons, whereas MoSPI CPI reflects retrospective survey "
-        "collection on fixed routes and dates. Co-movement indicates alignment with broader macroeconomic inflation trends."
+        "collection on fixed routes and dates. Co-movement indicates alignment with broader macroeconomic inflation trends. "
+        "MoSPI's revised (2024=100) CPI series does not publish a standalone domestic-airfare-only sub-index; the "
+        "benchmark used here is item 07.3 'Passenger transport services' (Combined), the closest published series, "
+        "which is a composite across rail, air, and road passenger fares -- not air fare alone."
     )
 
     @classmethod
@@ -52,7 +55,7 @@ class BenchmarkMatcherService:
                     value=val,
                     base_year=str(base_yr),
                     source=source,
-                    created_at=datetime.datetime.now(datetime.UTC),
+                    created_at=utcnow(),
                 )
                 db.add(rec)
                 created_records.append(rec)
@@ -62,7 +65,7 @@ class BenchmarkMatcherService:
 
     @classmethod
     def get_benchmark_series(
-        cls, db: Session, indicator_name: str = "CPI_AIRFARE_DOMESTIC"
+        cls, db: Session, indicator_name: str = "CPI_PASSENGER_TRANSPORT_SERVICES"
     ) -> List[Dict[str, Any]]:
         """Queries stored MoSPI benchmark series ordered chronologically."""
         records = (

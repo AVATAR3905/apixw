@@ -6,6 +6,8 @@ we group tokens by proximity of their y-centroids — simple, deterministic,
 and good enough to turn flat OCR output back into per-card records.
 """
 
+import csv
+import io
 import statistics
 from typing import Any, List, NamedTuple
 
@@ -72,6 +74,36 @@ def tokens_from_paddle_result(res: dict) -> List[OCRToken]:
         else:
             x1, y1, x2, y2 = 0.0, 0.0, 1.0, 1.0
         tokens.append(OCRToken(text=str(text), bbox=[x1, y1, x2, y2], score=score))
+    return tokens
+
+
+def tokens_from_tesseract_tsv(tsv_text: str) -> List[OCRToken]:
+    """Build OCRTokens from tesseract v4/v5 TSV word rows.
+
+    Tesseract emits one row per word (``level == 5``) with pixel geometry
+    columns ``left/top/width/height`` plus a 0..100 ``conf``. We map those to
+    the exact same geometry OCRToken tuple the paddle rungs produce so the
+    clusterer (and the OCR→VLM ladder) never sees two token shapes.
+    """
+
+    tokens: List[OCRToken] = []
+    for row in csv.DictReader(io.StringIO(tsv_text), delimiter="\t"):
+        if row.get("level") != "5":
+            continue  # only word-level rows carry box + confidence
+        text = (row.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            x1 = float(row["left"])
+            y1 = float(row["top"])
+            x2 = x1 + float(row["width"])
+            y2 = y1 + float(row["height"])
+            conf = float(row["conf"])
+        except (KeyError, ValueError, TypeError):
+            x1, y1, x2, y2 = 0.0, 0.0, 1.0, 1.0
+            conf = 1.0
+        score = (conf / 100.0) if conf >= 0 else 0.0
+        tokens.append(OCRToken(text=text, bbox=[x1, y1, x2, y2], score=score))
     return tokens
 
 

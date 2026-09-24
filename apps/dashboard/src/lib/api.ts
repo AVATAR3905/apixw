@@ -30,6 +30,12 @@ export interface IndexResponse {
   is_low_coverage: boolean;
   period_start: string;
   active_version: string;
+  // NSO-standard uncertainty around the point estimate
+  standard_error?: number | null;
+  index_ci_lower?: number | null;
+  index_ci_upper?: number | null;
+  bootstrap_replications?: number | null;
+  variance_method?: string | null;
 }
 
 export interface TimeseriesPoint {
@@ -121,6 +127,9 @@ export interface HistoryAndForecastPoint {
   p75?: number;
   p90?: number;
   model_confidence?: number;
+  standard_error?: number;
+  ci_lower?: number;
+  ci_upper?: number;
   type: "observed" | "forecast";
 }
 

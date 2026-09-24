@@ -14,7 +14,7 @@ def test_client():
     return TestClient(app)
 
 
-def test_dual_feed_execution_and_storage(carrier_baseline):
+def test_dual_feed_execution_and_storage(carrier_direct_live_fake):
     """Runs a real-world collection cycle and verifies that observations have is_synthetic=False."""
     result = run_dual_feed_collection(route_code="DEL-BOM", advance_days=7)
 

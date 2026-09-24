@@ -12,16 +12,21 @@ CSV_PATH = "data/reference/dgca_traffic.csv"
 
 
 def test_dgca_traffic_csv_bidirectional_parsing():
-    """Verifies that directional flows (DEL->BOM and BOM->DEL) are aggregated into city pairs."""
+    """Verifies that directional flows (DEL->BOM and BOM->DEL) are aggregated into city pairs.
+
+    Volumes are trailing-12-month (Aug 2025-Jul 2026) real DGCA city-pair passenger
+    traffic, sourced via github.com/Vonter/india-aviation-traffic's aggregation of
+    DGCA Monthly Domestic Air Transport Statistics publications.
+    """
     volumes = DGCAWeightEngine.parse_traffic_csv(CSV_PATH)
     assert len(volumes) == 10
-    # DEL-BOM: 1,650,000 + 1,600,000 = 3,250,000
-    assert volumes["DEL-BOM"] == 3250000.0
-    # DEL-BLR: 1,270,000 + 1,240,000 = 2,510,000
-    assert volumes["DEL-BLR"] == 2510000.0
+    # DEL-BOM: 3,397,825 + 3,380,512 = 6,778,337
+    assert volumes["DEL-BOM"] == 6778337.0
+    # DEL-BLR: 2,441,621 + 2,435,537 = 4,877,158
+    assert volumes["DEL-BLR"] == 4877158.0
     # Regional routes
-    assert volumes["DEL-IXS"] == 1020000.0
-    assert volumes["DEL-DHM"] == 920000.0
+    assert volumes["DEL-IXS"] == 16610.0
+    assert volumes["DEL-DHM"] == 131205.0
 
 
 def test_weights_sum_to_one():
@@ -33,8 +38,10 @@ def test_weights_sum_to_one():
     total_weight = sum(weights.values())
     assert abs(total_weight - 1.0) <= 1e-6
 
-    # Verify hierarchy: DEL-BOM is highest volume, DHM is lowest
-    assert weights["DEL-BOM"] > weights["DEL-BLR"] > weights["DEL-IXS"] > weights["DEL-DHM"]
+    # Verify hierarchy: DEL-BOM is highest volume, IXS (Silchar) is lowest --
+    # real DGCA traffic has DEL-DHM (Dharamsala) carrying more passengers than
+    # DEL-IXS (Silchar) over the trailing 12 months.
+    assert weights["DEL-BOM"] > weights["DEL-BLR"] > weights["DEL-DHM"] > weights["DEL-IXS"]
 
 
 def test_normalization_error_on_zero_volume():

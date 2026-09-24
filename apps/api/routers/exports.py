@@ -17,16 +17,18 @@ router = APIRouter(prefix="/api/v1/export", tags=["Researcher Data Exports"])
 @router.get("/daily-index.csv")
 def export_daily_index_csv(
     series: str = Query("BASE_FARE", pattern="^(BASE_FARE|TOTAL_PRICE)$"),
+    series_type: str = Query("HEADLINE", pattern="^(HEADLINE|CORE)$"),
     horizon: int = Query(15),
     db: Session = Depends(get_db),
 ):
     """Exports daily headline or sub-index time series in CSV format."""
     query = db.query(IndexValue).filter(
         IndexValue.index_series == series,
+        IndexValue.series_type == series_type,
         IndexValue.route_id.is_(None),
     )
     if horizon in (14, 15):
-        query = query.filter(IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]))
+        query = query.filter(IndexValue.index_type.in_(["HEADLINE_T15"]))
     else:
         query = query.filter(IndexValue.index_type == f"SUB_T{horizon}")
 
@@ -38,6 +40,7 @@ def export_daily_index_csv(
         [
             "date",
             "index_series",
+            "series_type",
             "index_type",
             "lead_time_days",
             "index_value",
@@ -55,6 +58,7 @@ def export_daily_index_csv(
             [
                 r.period_start.isoformat(),
                 r.index_series,
+                r.series_type,
                 r.index_type,
                 r.lead_time_days,
                 r.index_value,
@@ -68,7 +72,7 @@ def export_daily_index_csv(
         )
 
     output.seek(0)
-    filename = f"airfare_index_{series.lower()}_t{horizon}_{datetime.date.today().isoformat()}.csv"
+    filename = f"airfare_index_{series.lower()}_{series_type.lower()}_t{horizon}_{datetime.date.today().isoformat()}.csv"
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -79,16 +83,18 @@ def export_daily_index_csv(
 @router.get("/daily-index.json")
 def export_daily_index_json(
     series: str = Query("BASE_FARE", pattern="^(BASE_FARE|TOTAL_PRICE)$"),
+    series_type: str = Query("HEADLINE", pattern="^(HEADLINE|CORE)$"),
     horizon: int = Query(15),
     db: Session = Depends(get_db),
 ):
     """Exports daily headline or sub-index time series in structured JSON format."""
     query = db.query(IndexValue).filter(
         IndexValue.index_series == series,
+        IndexValue.series_type == series_type,
         IndexValue.route_id.is_(None),
     )
     if horizon in (14, 15):
-        query = query.filter(IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]))
+        query = query.filter(IndexValue.index_type.in_(["HEADLINE_T15"]))
     else:
         query = query.filter(IndexValue.index_type == f"SUB_T{horizon}")
 
@@ -98,6 +104,7 @@ def export_daily_index_json(
         {
             "date": r.period_start.isoformat(),
             "index_series": r.index_series,
+            "series_type": r.series_type,
             "index_type": r.index_type,
             "lead_time_days": r.lead_time_days,
             "index_value": r.index_value,
@@ -111,7 +118,7 @@ def export_daily_index_json(
         for r in records
     ]
 
-    filename = f"airfare_index_{series.lower()}_t{horizon}_{datetime.date.today().isoformat()}.json"
+    filename = f"airfare_index_{series.lower()}_{series_type.lower()}_t{horizon}_{datetime.date.today().isoformat()}.json"
     return Response(
         content=json.dumps(data, indent=2),
         media_type="application/json",

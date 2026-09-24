@@ -72,12 +72,35 @@ def _importable(module: str) -> bool:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _lan_ip() -> str:
+    """Returns the primary LAN IPv4 address of this machine ('' if unknown)."""
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        return ip or "127.0.0.1"
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return "127.0.0.1"
+
+
 def _print_banner(api_port: int, dash_port: int, api_host: str):
+    lan = _lan_ip()
+    api_url = f"http://{lan}:{api_port}" if lan and "0.0.0.0" in api_host else f"http://{api_host}:{api_port}"
     print("\n" + "=" * 80)
     print("  INDIA AIRFARE PRICE OBSERVATORY (APIX-2.0)  —  FULL PIPELINE LAUNCHER")
     print("=" * 80)
-    print(f"  API Docs:    http://{api_host}:{api_port}/docs")
-    print(f"  Dashboard:   http://localhost:{dash_port}")
+    print(f"  Dashboard (this PC):  http://localhost:{dash_port}")
+    if lan:
+        print(f"  Dashboard (network):  http://{lan}:{dash_port}")
+    print(f"  API Docs:             {api_url}/docs")
+    print("  Open any of the above in a browser to view the dashboard.")
     print("  Ctrl+C to gracefully shut down.\n")
     print("=" * 80)
 

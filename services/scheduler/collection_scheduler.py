@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database.session import SessionLocal
 from packages.schemas.models import CollectionJob, Route, Source
+from packages.shared.time_utils import utcnow
 from services.collectors.base import BaseConnector
 from services.collectors.live_connector import LiveFlightConnector
 
@@ -63,7 +64,7 @@ class CollectionScheduler:
                     advance_days=horizon,
                     status="PENDING",
                     attempt_count=1,
-                    created_at=datetime.datetime.now(datetime.UTC),
+                    created_at=utcnow(),
                 )
                 db.add(job)
                 db.commit()

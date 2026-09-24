@@ -4,7 +4,6 @@ Forecasts are read-only estimates until their target dates pass. We store every
 generated forecast in ``forecast_snapshots`` so that, once actual index values
 arrive, the system can report how accurate each horizon actually was.
 """
-
 import json
 import logging
 from collections import defaultdict
@@ -14,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import ForecastSnapshot, IndexValue
+from packages.shared.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +127,9 @@ def compute_forecast_accuracy(
     if not realized:
         return summary
 
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
-    cutoff = datetime.utcnow().date() - timedelta(days=lookback_days)
+    cutoff = utcnow().date() - timedelta(days=lookback_days)
     snapshots = (
         db.query(ForecastSnapshot)
         .filter(

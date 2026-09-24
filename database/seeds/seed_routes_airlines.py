@@ -4,13 +4,13 @@ Route weights are intentionally NOT created here. DGCAWeights are owned by
 `packages.statistics.weights.DGCAWeightEngine.persist_weights_version` so that
 weight versioning and lineage remain consistent (exactly one active set at a time).
 """
-
 import datetime
 
 from sqlalchemy.orm import Session
 
 from database.session import SessionLocal
 from packages.schemas.models import Airline, MethodologyVersion, Route, Source
+from packages.shared.time_utils import utcnow
 
 
 def seed_routes(db: Session):
@@ -239,6 +239,92 @@ def seed_sources(db: Session):
             "enabled": True,
             "health_status": "HEALTHY",
         },
+        # Top 6 Indian OTAs (source ids 7-12 align with the OTA scraper registry
+        # in services/collectors/ota/ and the /api/v1/ota/sources-status endpoint).
+        {
+            "id": 7,
+            "name": "MakeMyTrip India",
+            "type": "OTA",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        {
+            "id": 8,
+            "name": "Ixigo Flights",
+            "type": "OTA",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        {
+            "id": 9,
+            "name": "EaseMyTrip",
+            "type": "OTA",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        {
+            "id": 10,
+            "name": "Yatra Online",
+            "type": "OTA",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        {
+            "id": 11,
+            "name": "Cleartrip",
+            "type": "OTA",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        {
+            "id": 12,
+            "name": "Skyscanner India",
+            "type": "METASEARCH",
+            "access_method": "PLAYWRIGHT",
+            "access_mode": "CONDITIONAL",
+            "permission_status": "APPROVED",
+            "tos_status": "PUBLIC_FLIGHT_SEARCH",
+            "robots_status": "COMPLIANT",
+            "license_status": "AGGREGATOR_RESEARCH",
+            "rate_limit": 15,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
     ]
 
     for s in sources:
@@ -246,6 +332,7 @@ def seed_sources(db: Session):
         if not existing:
             db.add(
                 Source(
+                    id=s.get("id"),
                     name=s["name"],
                     type=s["type"],
                     access_method=s["access_method"],
@@ -257,7 +344,7 @@ def seed_sources(db: Session):
                     rate_limit=s["rate_limit"],
                     enabled=s["enabled"],
                     health_status=s["health_status"],
-                    last_reviewed_at=datetime.datetime.utcnow(),
+                    last_reviewed_at=utcnow(),
                 )
             )
         else:
@@ -279,18 +366,25 @@ def seed_methodology(db: Session):
                 name="India Airfare Price Index (Modified Laspeyres with Fare-Mix Protection & T+15 Anchor)",
                 base_period="2026-08-01",
                 anchor_lead_time="T+15",
-                price_estimator="LOWEST_ECONOMY_CARRIER_MEDIAN",
+                price_estimator="LOWEST_ECONOMY_JEVONS_GEOMETRIC_MEAN",
                 missing_data_method="EXCLUDE_SOLD_OUT_RECORD_COVERAGE",
                 outlier_method="ROBUST_MEDIAN_FILTER",
                 weight_method="DGCA_BIDIRECTIONAL_PASSENGER_VOLUME",
-                formula="I_t = 100 * sum(w_j * (P_{j,t,T+15} / P_{j,0,T+15}))",
+                formula=(
+                    "I_t = 100 * sum(w_j * (P_{j,t,T+15} / P_{j,0,T+15})); "
+                    "P_{j,t,h} = exp(mean(ln P_{j,t,h,c}))"
+                ),
                 effective_from=datetime.date(2026, 1, 1),
                 notes=(
-                    "APIX-2.0 eliminates fare-mix distortion by taking the minimum available non-refundable "
-                    "economy fare per scheduled carrier before cross-carrier median estimation. "
-                    "The headline national index is anchored at T+15, while T+1, T+7, T+15, T+30, T+45 "
-                    "are computed as unpooled sub-indices. Both Base Fare and Total Price series are supported. "
-                    "Route weights reflect DGCA boarded passenger volumes across 8 metro trunks and 2 regional corridors."
+                    "APIX-2.0 eliminates fare-mix distortion by taking the minimum "
+                    "available non-refundable economy fare per scheduled carrier before "
+                    "cross-carrier Jevons geometric-mean estimation (IMF CPI Manual 2020 "
+                    "Ch.10). "
+                    "The headline national index is anchored at T+15, while T+1, T+7, "
+                    "T+15, T+30, T+45 are computed as unpooled sub-indices. Both Base "
+                    "Fare and Total Price series are supported. "
+                    "Route weights reflect DGCA boarded passenger volumes across 8 metro "
+                    "trunks and 2 regional corridors."
                 ),
             )
         )

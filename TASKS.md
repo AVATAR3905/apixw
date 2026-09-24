@@ -683,7 +683,141 @@ Phase 11: Machine Learning & Anomaly Detection Foundations (P2/P3 Future Scope)
   - `carrier_direct_scraper._extract_via_ocr` now merges on-page fields (incl. verified travel date with mismatch logging) instead of hardcoding fallbacks; VLM enabled by default behind a safe `VLMNotConfigured` guard.
   - Comparison/backtest match keys (`route + flight_number + travel_date`) are now grounded in on-page truth, not just query context.
   - Added `RESEARCH.md` (linked from README + PRD sitemaps): BLS/OAG/BTS index-methodology benchmarks, consumer prediction tools (Hopper/Kayak/Google/Farecast), academic literature, Zyte 2026 anti-bot landscape + legal frame (RFC 9309, hiQ/Van Buren/Meta-v-Bright Data, DMCA §1201), India regulatory context (DGCA TMU 78 routes, FIA data refusal, AirPrice Guardian, +20.5% fare surge), USP distillation + P1-P3 roadmap — all with source links.
-  - **Acceptance Criteria:** extraction captures full record incl. on-page dates; full suite 156 passed; ruff clean.
+  - **Acceptance Criteria:** extraction captures full record incl. on-page dates; full suite 200 passed; ruff clean.
+
+---
+## 📈 APIX-2.1 Statistical Rigor Enhancement Workstream (v2.1)
+
+A dedicated statistical-rigor workstream (Phases 1a–6 of the v2.1 plan) tightening
+the official methodology for MoSPI review. **All phases complete — full suite 180 passed, ruff clean.**
+
+### v2.1 — Phase 1a: Hybrid Laspeyres–Jevons Methodology Rewrite
+- Rewrote `METHODOLOGY.md` §1 with the **two-stage hybrid Laspeyres–Jevons** formulation (IMF CPI Manual 2020 Ch.10 + UK ONS web-scraped price guidance): Jevons **geometric mean** elementary aggregates per route–horizon cell, then **Laspeyres arithmetic** combination across the DGCA-weighted basket.
+- Added §1.1 (elementary aggregate formula + statistical-credibility rationale) and §5 (References: IMF 2020, Jevons 1863, ONS).
+- Wiring verified: `RepresentativePriceEstimator(estimator="JEVONS")` feeds `DailyIndexCalculatorService` → `AirfareIndexEngine`.
+
+### v2.1 — Phase 1b: T+15 Anchor Justification
+- `docs/T15_anchor_analysis.md`: booking-horizon analysis justifying the **T+15** anchor (two-week advance purchase) against the five monitored lead times.
+
+### v2.1 — Phase 1c: Dual-Series HEADLINE / CORE Index
+- **CORE continuity guard**: a series that skips days lacking a continuous, non-fallback base reference — immune to peak/festival-week distortion.
+- `_find_core_anchor` (`services/index_engine/calculator_service.py`) re-anchors the base reference to the nearest festival-free day (forward-first, then backward, ≤ 21 days, never beyond `observation_date`); series is skipped entirely if no route has a genuine non-fallback base price.
+- Dual-series surfaced everywhere: `/api/v1/index?series_type=HEADLINE|CORE`, `/index/daily`, exports (`CSV header: date,index_series,series_type,index_type`).
+- **Verified 2026-09-14 (vs HEADLINE):** BASE_FARE CORE=**110.89** (HEADLINE=107.07); TOTAL_PRICE CORE=**105.35** (HEADLINE=100.79).
+
+### v2.1 — Phase 2: OTA Feed Tagging & Source-Pair Markup Audits
+- `BaseOTAScraper.FEED_TYPE="OTA_AGGREGATOR"` tags every quote from the 6 OTA scrapers (MakeMyTrip, Ixigo, EaseMyTrip, Yatra, Cleartrip, Skyscanner — **source ids 7–12**, explicit ids passed in `seed_routes_airlines.py`).
+- `RealFareNormalizer`: `OTA_SOURCE_NAMES` set + feed→source-id mapping so aggregator quotes resolve to the correct `Source`.
+- `DiscrepancyAudit` extended: `audit_type` (CROSS_FEED/OTA_SOURCE_PAIR), source_a/b_id, source_a/b_name, feed_type_a/b, price_a/b, `markup_amount`/`markup_pct`, `idx_audit_type_travel`; new validation statuses (`EXACT_PARITY`, `AGGREGATOR_MARKUP`, `AGGREGATOR_DISCOUNT`, `FALLBACK_RPC_USED`, `DIRECT_ONLY`).
+- New `SourcePairAuditor` (`packages/statistics/source_pair_auditor.py`): reference = carrier-direct quote when present, else cheapest observed; per-source dedup; `MARKUP_TRIGGER_INR=50`; persists `OTA_SOURCE_PAIR` rows.
+- API: `GET /api/v1/validation/source-pair`, `POST /api/v1/ota/source-pair-audit`.
+- **Verified live:** 50 source-pair audits — 39 **AGGREGATOR_MARKUP**, 11 **EXACT_PARITY**, `avg_markup_inr=209.06` (sample MMT-over-EaseMyTrip +₹270 / +6.68%).
+
+### v2.1 — Phase 3: DGCA Official Benchmark Comparator
+- `DGCAMonthlyFare` model (`dgca_monthly_fares` table) + official comparison `DGCABenchmarkComparator`; `GET /api/v1/validation/dgca` compares Observatory series against DGCA monthly fare statistics.
+
+### v2.1 — Phase 5: Multi-OTA Ensemble & Feed-Correlation Tracking
+- `ENSEMBLE` estimator (`packages/statistics/estimators.py`): **feed-quality-weighted median** of per-carrier minimum fares — weights CARRIER_DIRECT=1.0, RPC_FALLBACK=0.9, OTA_AGGREGATOR=0.7, SYNTHETIC_BASELINE=0.3 — with survivor-set alignment after MAD/IQR outlier filtering.
+- `SourceCorrelation` model (`source_correlations`) + `SourceCorrelationTracker` (`packages/statistics/source_correlation.py`): rolling Pearson r between CARRIER_DIRECT and OTA_AGGREGATOR daily representative series per route/horizon; `CORRELATION_TOLERANCE=0.7` flags feed divergence.
+- API: `GET /api/v1/validation/source-correlation`, `POST /api/v1/validation/compute-source-correlation`.
+
+### v2.1 — Phase 4: Anomaly Detection, Escalation & Confidence Scores
+- `packages/statistics/anomaly_detector.py`: IQR Tukey fences + MAD z-scores per point, severity classification (`LOW`/`MODERATE`/`SEVERE`), **2% practical-significance floor**, and escalation logic (SEVERE, or consecutive ≥2 MODERATE).
+- `AnomalyEvent` model (`anomaly_events`) + idempotent `PriceAnomalyService` (`packages/statistics/anomaly_service.py`) with stale-resolution.
+- API: `GET /api/v1/analytics/anomalies`, `POST /api/v1/analytics/run-anomaly-detection`.
+- **Confidence on index outputs:** `/api/v1/index` now returns `confidence_score` (composite quality × feed trust) and `confidence_band` plus `outlier_count`.
+- **Verified live:** 6 SEVERE festival-week spikes flagged (09-09..09-14, z≈5–30); marginal LOW noise filtered by the deviation floor.
+
+### v2.1 — Phase 6: API Documentation Polish & Rate-Limit Docs
+- `openapi_tags` in `apps/api/main.py` aligned to all 9 used tags (added Forecasting, Statistical Analytics, Observatory AI Intelligence, Researcher Data Exports, APIx Viewer); every endpoint tagged.
+- `examples=` / `description=` added to `/index` and the validation/audit endpoints.
+- Rate limiting documented in-app (120 req/min, 20 req/min on `/export/*`), `X-RateLimit-*` headers, `429` + `Retry-After`.
+- `RateLimitMiddleware` exemptions made prefix-based: `/docs*` and `/ui*` (viewer subresources) are no longer rate-limited.
+- New `tests/unit/test_rate_limit.py` (4 tests).
+
+### v2.1 — Final Validation
+- Full suite: **180 passed** (`pytest tests/ -q --ignore=tests/e2e`), **ruff clean**.
+- Migration chain verified: `fdf05b42` → `a1b2c3d4e5f6` → `b0a1c2d3e4f5` → `c1d2e3f4a5b6` → `d3e4f5a6b7c8` (head).
+
+---
+
+## 📈 APIX-2.2 Governance & Policy Intelligence Workstream (v2.2)
+
+Extends the Observatory from a statistical index into a **policy instrument layer** —
+built for the RBI Monetary Policy Committee (Transient vs Structural transmission),
+CCI (carrier concentration monitoring), MoCA (UDAN affordability), and MoSPI
+(Billion-Prices lead-lag early-warning). **All 7 features complete — full suite 200 passed, ruff clean.**
+
+### v2.2 — Policy Transmission Classifier (RBI MPC framing)
+- `packages/statistics/policy_signal.py`: `PolicySignalClassifier` / `classify_elevation`.
+- For every index movement above a 5% elevation threshold, classifies the current elevation as
+  **TRANSIENT** (reverses within 14 days, festival-calendar-aligned, single-carrier) vs
+  **STRUCTURAL** (sustained 21+ days, multi-carrier correlated, ATF-aligned) via a cumulative
+  structural/transient evidence score (baseline = pre-spike first-half median, so a long
+  structural rise cannot pull up its own reference).
+- Emits a **one-line policy signal**: e.g. `STRUCTURAL — sustained 1 day above baseline across
+  multi-carrier with ATF +3.8% co-movement; recommend CPI adjustment & passthrough review.`
+- Wire-in: carrier breadth (distinct AVAILABLE carriers on latest observation date) and
+  ATF co-movement (Delhi hub, trailing window) come from live `fare_observations` / `atf_prices`.
+- Endpoints: `GET /api/v1/analytics/policy-signal`. Live: **STRUCTURAL**, latest 107.07 vs
+  baseline 100.01 (+7.06%), ATF +3.82%, 4 carriers.
+
+### v2.2 — Billion-Prices Lead-Lag (IMF / Harvard PriceStats methodology)
+- `packages/statistics/leading_indicator.py`: weekly sub-sampling of the prototype index,
+  monthly→weekly CPI expansion, Pearson-r + directional accuracy at lags 0-4 weeks.
+- Live: aligned 6 weeks (2026-07-27 → 2026-08-31), best lag 0 weeks (r=0.29) — honest
+  "no leading advantage yet detected" while the high-frequency series accumulates history.
+- Endpoint: `GET /api/v1/analytics/leading-indicator`. Guards constant-window NaN (single
+  not-yet-updated CPI month) by treating zero-variance windows as no evidence.
+
+### v2.2 — Explainable Anomaly Alerts (#11)
+- `packages/statistics/anomaly_explainer.py`: `AnomalyExplainer` correlates every anomaly event
+  against ATF prices (Delhi, 30-day window), the festival / peak-demand calendar (±3 days),
+  carrier availability (SOLD_OUT ratio + distinct carriers), and day-of-week.
+- Renders a plain-English alert: `national index moved abnormally on 2026-09-14 (Monday) —
+  ATF (Delhi) moved +1.7% over the window.`
+- Endpoint: `GET /api/v1/analytics/alerts` (enriched `anomaly_events` feed). Live: 6 alerts,
+  0 unexplained.
+
+### v2.2 — Carrier HHI Concentration Monitoring (CCI)
+- `packages/statistics/concentration.py`: route-level Herfindahl-Hirschman index from observed
+  carrier quote presence (HHI = Σsᵢ² × 10⁴, CCI BANDS: <1500 LOW / 1500-2500 MODERATE / >2500 HIGH),
+  plus network correlation of HHI vs fare level and HHI vs fare volatility.
+- Live: 10 routes; network avg HHI 2259.9; DEL-IXS 3335.8 / DEL-DHM 3261.7 **HIGH** (regional
+  thin), all 8 trunk routes MODERATE; **r(HHI↔fare)=0.888, r(HHI↔volatility)=0.872** — confirms
+  concentration → higher, more volatile fares.
+- Endpoints: `GET /api/v1/analytics/concentration`, `GET /api/v1/analytics/concentration/{route_code}`.
+
+### v2.2 — Intraday Pricing Volatility Index + Best-Time-To-Book (#4)
+- `packages/statistics/intraday_volatility.py`: coefficient-of-variation of same-travel-date fares
+  across the 06:00 / 12:00 / 18:00 / 23:00 IST snapshot windows + per-route **best-time-to-book**
+  (lowest-mean window) + network "how much of the monthly average is noise vs signal" read.
+- Live: network avg intraday CV **11.1%**; network best-to-book EVENING_1800 (₹4,552 mean);
+  DEL-BOM best NIGHT_2300 (₹5,370 vs NOON ₹7,058).
+- Endpoints: `GET /api/v1/analytics/intraday-volatility`, `.../intraday-volatility/{route_code}`.
+
+### v2.2 — Availability-Adjusted Index (#5)
+- `packages/statistics/availability_index.py`: SOLD_OUT pressure is a demand signal, not noise —
+  the scarcity premium (saturating, max +35% at full sell-out: `premium = β·ratio`, β=0.35)
+  corrects the headline index for the consumer-cost understatement academic airfare economics
+  documents. Fully disclosed as a model parameter, not a quoted fare.
+- Endpoints: `GET /api/v1/analytics/availability-adjusted`. Includes per-route SOLD_OUT ratio
+  and implied adjustment %; gracefully reports ALL_QUOTES_SOLD_OUT routes.
+
+### v2.2 — UDAN Scheme Affordability Monitor (#7)
+- `packages/statistics/udan_monitor.py`: tracks REGIONAL_THIN routes (DEL-IXS, DEL-DHM) vs
+  trunk median and the UDAN 1-hour affordability benchmark (₹2,500): status
+  `AFFORDABLE / ELEVATED / BREACH`. First automated affordability monitor for UDAN pricing.
+- Live: **2 BREACHES** — DEL-IXS ₹5,774 (2.31× target), DEL-DHM ₹5,996 (2.40× target);
+  trunk median ₹5,378.
+- Endpoint: `GET /api/v1/analytics/udan`.
+
+### v2.2 — API Surface & Final Validation
+- New OpenAPI tag **"Governance & Policy Intelligence"** (9 endpoints) documented in
+  `openapi_tags` + app description in `apps/api/main.py`.
+- New tests: `tests/statistical/test_governance_intelligence.py` (13) +
+  `tests/unit/test_governance_api.py` (7).
+- Full suite: **200 passed** (`pytest tests/ -q --ignore=tests/e2e`, 40s), **ruff clean**.
 
 ---
 
@@ -705,4 +839,4 @@ Phase 11: Machine Learning & Anomaly Detection Foundations (P2/P3 Future Scope)
 | **Phase 11** | ML Anomaly & Forecasting Extensions | P2/P3 | Phase 10 | ✅ Completed |
 
 ---
-*All 12 phases complete. The project is production-ready: 144 test suite green, dashboard builds cleanly, and the full API surface (index, corridors, forecast, OTA, AI copilot, exports) is operational on both Postgres and the SQLite fallback.*
+*All 12 phases complete. The project is production-ready: **200 test suite green**, dashboard builds cleanly, and the full API surface (index, corridors, forecast, OTA, AI copilot, exports) plus the new Governance & Policy Intelligence layer (policy-signal, lead-lag, alerts, concentration, intraday-volatility, availability-adjusted, UDAN) is operational on both Postgres and the SQLite fallback. See the APIX-2.1 Statistical Rigor Enhancement Workstream and the APIX-2.2 Governance & Policy Intelligence Workstream above.*

@@ -12,12 +12,25 @@ from typing import Any, Dict, List
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import Airline, DiscrepancyAudit, Route
+from packages.shared.time_utils import utcnow
 
 
 class CrossFeedDiscrepancyValidator:
     """Validates carrier direct pricing against aggregator RPC feed and selects primary observations."""
 
     PARITY_TOLERANCE_INR = 50.0  # Fares within +/- INR 50 are considered exact parity
+    MATCH_TOLERANCE_MINUTES = 35  # Departure-time window for RPC↔direct flight matching
+
+    @classmethod
+    def _departure_minutes(cls, value: Any) -> int:
+        """Parses 'HH:MM' (or longer) into minutes-of-day; tolerates None/malformed."""
+        try:
+            if not value:
+                raise ValueError
+            hh, mm = str(value).split(":")[:2]
+            return int(hh) * 60 + int(mm)
+        except (ValueError, TypeError):
+            return -1
 
     @classmethod
     def validate_and_reconcile(
@@ -34,6 +47,10 @@ class CrossFeedDiscrepancyValidator:
         1. Compares prices for matched flights.
         2. Logs DiscrepancyAudit records.
         3. Returns prioritized observations (Carrier Direct first, RPC fallback second).
+
+        RPC↔direct matching is tolerant: an exact flight-number match wins, otherwise
+        the closest same-carrier departure time within MATCH_TOLERANCE_MINUTES is used.
+        Each RPC quote is consumed at most once.
         """
         route = db.query(Route).filter(Route.route_code == route_code.upper()).first()
         route_id = route.id if route else 1
@@ -54,6 +71,7 @@ class CrossFeedDiscrepancyValidator:
         prioritized_observations: List[Dict[str, Any]] = []
 
         matched_rpc_keys = set()
+        rpc_consumed = [False] * len(rpc_quotes)
 
         # Step 1: Evaluate all Carrier Direct quotes (Priority 1)
         for d_key, d_quote in direct_map.items():
@@ -63,22 +81,41 @@ class CrossFeedDiscrepancyValidator:
             f_no = str(d_quote.get("flight_number", f"{c_code}-101"))
             dep = str(d_quote.get("departure_time", "08:00"))[:5]
 
-            # Find matching RPC quote
+            # Find matching RPC quote: exact flight number wins, else the nearest
+            # same-carrier departure time within MATCH_TOLERANCE_MINUTES.
             rpc_match = None
-            for r in rpc_quotes:
+            rpc_index = -1
+            best_index = -1
+            best_delta = cls.MATCH_TOLERANCE_MINUTES + 1
+            dep_minutes = cls._departure_minutes(dep)
+            for idx, r in enumerate(rpc_quotes):
+                if rpc_consumed[idx]:
+                    continue
                 r_code = r.get("carrier_code")
                 r_fno = str(r.get("flight_number", ""))
-                r_dep = str(r.get("departure_time", ""))[:5]
-
-                if r_code == c_code and (
-                    r_fno == f_no or r_dep == dep or f"{c_code}_{r_fno}" == d_key
-                ):
+                if r_code != c_code:
+                    continue
+                if r_fno == f_no or f"{c_code}_{r_fno}" == d_key:
                     rpc_match = r
-                    matched_rpc_keys.add(f"{r_code}_{r_fno}")
+                    rpc_index = idx
+                    best_delta = 0
                     break
+                if dep_minutes < 0:
+                    continue
+                r_delta = abs(dep_minutes - cls._departure_minutes(r.get("departure_time")))
+                if r_delta <= cls.MATCH_TOLERANCE_MINUTES and r_delta < best_delta:
+                    best_delta = r_delta
+                    best_index = idx
 
-            if rpc_match:
+            if rpc_match is None and best_index >= 0:
+                rpc_match = rpc_quotes[best_index]
+                rpc_index = best_index
+
+            if rpc_match is not None:
+                rpc_consumed[rpc_index] = True
                 rpc_price = float(rpc_match["total_fare"])
+                r_fno = str(rpc_match.get("flight_number", f"{c_code}-101"))
+                matched_rpc_keys.add(f"{c_code}_{r_fno}")
                 diff = rpc_price - direct_price
                 pct_diff = (abs(diff) / direct_price) * 100.0 if direct_price > 0 else 0.0
 
@@ -109,14 +146,20 @@ class CrossFeedDiscrepancyValidator:
                 discrepancy_pct=pct_diff,
                 validation_status=status,
                 notes=notes,
-                verified_at=datetime.datetime.now(datetime.UTC),
+                verified_at=utcnow(),
             )
             db.add(audit)
             audits.append(audit)
 
-            # Prioritize Carrier Direct Quote
-            d_quote["feed_type"] = "CARRIER_DIRECT"
-            d_quote["is_primary_source"] = True
+            # Prioritize Carrier Direct Quote -- but never relabel a calibrated
+            # fallback (browser scrape was blocked/unavailable) as a genuine
+            # CARRIER_DIRECT network observation. Only quotes the scraper itself
+            # tagged CARRIER_DIRECT (real DOM/JSON extraction) keep that feed
+            # type; anything else keeps its true origin tag so is_synthetic
+            # downstream reflects reality.
+            if d_quote.get("feed_type") not in ("CALIBRATED_BASELINE", "SYNTHETIC_BASELINE"):
+                d_quote["feed_type"] = "CARRIER_DIRECT"
+            d_quote["is_primary_source"] = d_quote.get("feed_type") == "CARRIER_DIRECT"
             d_quote["validation_status"] = status
             prioritized_observations.append(d_quote)
 
@@ -148,7 +191,7 @@ class CrossFeedDiscrepancyValidator:
                     discrepancy_pct=0.0,
                     validation_status="FALLBACK_RPC_USED",
                     notes="Carrier direct website was unavailable/uncovered. Activated RPC fallback.",
-                    verified_at=datetime.datetime.now(datetime.UTC),
+                    verified_at=utcnow(),
                 )
                 db.add(audit)
                 audits.append(audit)
@@ -183,7 +226,7 @@ class CrossFeedDiscrepancyValidator:
             "primary_observations": prioritized_observations,
             "audits": [
                 {
-                    "carrier": a.airline_id,
+                    "carrier_code": a.airline.code if a.airline else "?",
                     "flight_number": a.flight_number,
                     "carrier_direct_price": a.carrier_direct_price,
                     "rpc_validator_price": a.rpc_validator_price,

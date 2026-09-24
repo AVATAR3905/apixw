@@ -121,7 +121,7 @@ def run_demo_rehearsal():
         latest_headline = (
             db.query(IndexValue)
             .filter(
-                IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]),
+                IndexValue.index_type.in_(["HEADLINE_T15"]),
                 IndexValue.index_series == "BASE_FARE",
                 IndexValue.route_id.is_(None),
             )

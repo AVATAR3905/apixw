@@ -1,0 +1,67 @@
+name: Collect Real Airfare Data
+
+# Offloads the 4x-daily real-data collection (10 routes x 5 horizons: T+1/7/
+# 15/30/45, across SpiceJet, Akasa, Google Flights RPC, Ixigo, EaseMyTrip)
+# off the local machine. Times below are IST, expressed as UTC for GitHub's
+# cron (IST = UTC+5:30): 06:00 -> 00:30, 12:00 -> 06:30, 18:00 -> 12:30,
+# 23:00 -> 17:30. This repo is public, so GitHub-hosted runner minutes are
+# unlimited/free; none of the sources this script hits need an API key, so
+# no repo secrets are required for it to run.
+#
+# Known real tradeoff, not a hypothetical: GitHub's runners are datacenter
+# IPs, the same class of address IndiGo is already confirmed to block on IP
+# reputation alone. This can degrade or newly block sources that work fine
+# from a home connection (SpiceJet/Akasa/Ixigo/EaseMyTrip) -- watch the
+# jobs_success/jobs_failed split in the first several runs (search this
+# workflow's logs for "FULL-BASKET COLLECTION COMPLETE") before relying on
+# this as the primary collection path.
+
+on:
+  schedule:
+    - cron: "30 0 * * *"
+    - cron: "30 6 * * *"
+    - cron: "30 12 * * *"
+    - cron: "30 17 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    concurrency:
+      group: apix-collection
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run full-basket real-data collection
+        run: python scripts/collect_full_real_coverage.py
+        env:
+          SCRAPE_MODE: live
+
+      - name: Commit and push updated database
+        run: |
+          git config user.name "apix-collector-bot"
+          git config user.email "actions@github.com"
+          git add airfare_observatory.db
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: automated data collection $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git pull --rebase origin main
+            git push
+          else
+            echo "No changes to commit."
+          fi

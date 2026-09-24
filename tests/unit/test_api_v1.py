@@ -14,6 +14,20 @@ def test_api_v1_index_endpoint():
     assert "index_value" in data
     assert data["index_series"] == "BASE_FARE"
     assert data["lead_time_days"] in (14, 15)
+    # NSO-standard uncertainty surfaces on the published index
+    assert "standard_error" in data
+    assert "index_ci_lower" in data
+    assert "index_ci_upper" in data
+    assert "bootstrap_replications" in data
+    assert "variance_method" in data
+
+
+def test_api_v1_index_endpoint_core_and_variance():
+    res = client.get("/api/v1/index?series_type=CORE")
+    assert res.status_code == 200
+    data = res.json()
+    assert "standard_error" in data
+    assert "index_ci_lower" in data
 
 
 def test_api_v1_index_timeseries():
@@ -22,6 +36,11 @@ def test_api_v1_index_timeseries():
     data = res.json()
     assert isinstance(data, list)
     assert len(data) >= 1
+    # every historical point exposes its uncertainty envelope
+    for point in data:
+        assert "standard_error" in point
+        assert "index_ci_lower" in point
+        assert "index_ci_upper" in point
 
 
 def test_api_v1_routes():

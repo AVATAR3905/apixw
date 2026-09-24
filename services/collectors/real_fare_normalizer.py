@@ -7,6 +7,15 @@ from sqlalchemy.orm import Session
 
 from packages.schemas.models import Airline, FareObservation, Route, Source
 
+OTA_SOURCE_NAMES = {
+    "MakeMyTrip India",
+    "Ixigo Flights",
+    "EaseMyTrip",
+    "Yatra Online",
+    "Cleartrip",
+    "Skyscanner India",
+}
+
 
 class RealFareNormalizer:
     """Normalizes real flight quotes, breaks down fare components, and applies Section 62 quality filters."""
@@ -32,6 +41,9 @@ class RealFareNormalizer:
         source_map = {s.name: s.id for s in sources}
         carrier_source_id = source_map.get("Carrier Direct Booking Scraper", 5)
         rpc_source_id = source_map.get("Google Flights RPC Validator & Fallback", 6)
+        ota_source_ids = {
+            name: sid for name, sid in source_map.items() if name in OTA_SOURCE_NAMES
+        } or {}
 
         airlines = db.query(Airline).all()
         airline_map = {a.code: a.id for a in airlines}
@@ -51,23 +63,48 @@ class RealFareNormalizer:
             c_code = q.get("carrier_code", "6E")
             a_id = airline_map.get(c_code, 1)
 
-            # Fare Decomposition (Estimating statutory breakdown if total fare is unified)
-            # GST: 5% on base + fuel
-            # UDF / Airport Fee: ~INR 350 - 450
-            # Convenience Fee: ~INR 299
-            # Fuel Surcharge: ~15%
-            # Base Fare: Remaining (~70%)
-            udf = 350.0
-            conv_fee = (
-                299.0 if q.get("feed_type") == "RPC_FALLBACK" else 0.0
-            )  # Direct booking saves convenience fee
-            net_airline_revenue = max(500.0, total - udf - conv_fee)
-            gst = round(net_airline_revenue * 0.05, 2)
-            fuel = round(net_airline_revenue * 0.15, 2)
-            base = round(net_airline_revenue - gst - fuel, 2)
+            # Prefer a genuine fare decomposition when the collector already
+            # extracted one from the source (e.g. SpiceJet's real
+            # base/publishedFare split via NETWORK_API), so real observations
+            # aren't silently overwritten by the estimation formula below.
+            has_real_decomposition = (
+                q.get("extraction_method") == "NETWORK_API" and q.get("base_fare") is not None
+            )
+            if has_real_decomposition:
+                base = round(float(q["base_fare"]), 2)
+                fuel = round(float(q.get("fuel_surcharge", 0.0)), 2)
+                gst = round(float(q.get("tax_amount", 0.0)), 2)
+                udf = round(float(q.get("development_fee", 0.0)), 2)
+                conv_fee = round(float(q.get("convenience_fee", 0.0)), 2)
+            else:
+                # Fare Decomposition (Estimating statutory breakdown if total fare is unified)
+                # GST: 5% on base + fuel
+                # UDF / Airport Fee: ~INR 350 - 450
+                # Convenience Fee: ~INR 299
+                # Fuel Surcharge: ~15%
+                # Base Fare: Remaining (~70%)
+                udf = 350.0
+                conv_fee = (
+                    299.0 if q.get("feed_type") == "RPC_FALLBACK" else 0.0
+                )  # Direct booking saves convenience fee
+                net_airline_revenue = max(500.0, total - udf - conv_fee)
+                gst = round(net_airline_revenue * 0.05, 2)
+                fuel = round(net_airline_revenue * 0.15, 2)
+                base = round(net_airline_revenue - gst - fuel, 2)
 
             feed_type = q.get("feed_type", "CARRIER_DIRECT")
-            s_id = carrier_source_id if feed_type == "CARRIER_DIRECT" else rpc_source_id
+            if feed_type == "CARRIER_DIRECT":
+                s_id = carrier_source_id
+            elif feed_type == "OTA_AGGREGATOR":
+                # OTA scrapers embed their registry source_id on each quote; prefer
+                # it, falling back to the name map (both align with ota_router.py).
+                src_name = q.get("source_name", "")
+                s_id = int(
+                    q.get("source_id")
+                    or ota_source_ids.get(src_name, rpc_source_id)
+                )
+            else:
+                s_id = rpc_source_id
 
             obs = FareObservation(
                 source_id=s_id,
@@ -90,7 +127,11 @@ class RealFareNormalizer:
                 other_fee=0.0,
                 total_fare=total,
                 currency="INR",
-                is_synthetic=False,  # REAL WORLD DATA POINT!
+                # Only genuinely scraped/RPC quotes are real; a calibrated
+                # fallback that reached this path (browser blocked/unavailable)
+                # must stay flagged synthetic, never silently promoted to real.
+                is_synthetic=feed_type in ("CALIBRATED_BASELINE", "SYNTHETIC_BASELINE")
+                or q.get("extraction_method") == "CALIBRATED_MODEL",
                 feed_type=feed_type,
                 extraction_method=q.get(
                     "extraction_method", "RPC" if feed_type == "RPC_FALLBACK" else "NETWORK"

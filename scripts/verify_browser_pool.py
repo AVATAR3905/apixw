@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from services.collectors.browser_pool import BrowserUnavailable, get_browser_pool
 
 OUT_DIR = os.environ.get("EXTRACT_VERIFY_DIR") or os.path.join(tempfile.gettempdir(), "opencode")

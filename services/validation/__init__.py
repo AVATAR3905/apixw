@@ -1,4 +1,8 @@
 """Validation Package."""
+from services.validation.dgca_benchmark_comparator import (
+    DGCABenchmarkComparator,
+    run_dgca_benchmark,
+)
 from services.validation.dgca_validator import (
     DGCADataPoint,
     DGCAValidator,
@@ -11,4 +15,6 @@ __all__ = [
     "run_dgca_validation",
     "DGCADataPoint",
     "ValidationMetrics",
+    "DGCABenchmarkComparator",
+    "run_dgca_benchmark",
 ]

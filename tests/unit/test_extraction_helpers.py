@@ -1,7 +1,8 @@
 """Fast unit tests for paddleocr-3.x result adaptation and VLM field parsing."""
 
+from packages.ai.openrouter_vision import _fields_from_answer
 from services.extraction.layout_clusterer import tokens_from_paddle_result
-from services.extraction.vlm_service import _PaddleOCRVLBackend
+from services.extraction.vlm_service import VLMService, _PaddleOCRVLBackend
 
 
 def test_tokens_from_paddle_result_maps_rec_rows():
@@ -67,3 +68,48 @@ def test_vlm_extracts_full_fare_record():
         "departure_time": "06:40",
         "arrival_time": "08:55",
     }
+
+
+def test_openrouter_vision_parses_json_answer():
+    payload = (
+        '```json\n{"price": 4250, "origin": "DEL", "destination": "BOM",'
+        ' "airline": "6E", "flight_number": "6E-204",'
+        ' "departure_time": "06:40", "arrival_time": "08:55",'
+        ' "stops": 0, "duration_minutes": 135, "travel_date": "2026-09-14"}\n```'
+    )
+    assert _fields_from_answer(payload) == {
+        "price": 4250.0,
+        "origin": "DEL",
+        "destination": "BOM",
+        "airline": "6E",
+        "flight_number": "6E-204",
+        "departure_time": "06:40",
+        "arrival_time": "08:55",
+        "stops": 0,
+        "duration_minutes": 135,
+        "travel_date": "2026-09-14",
+    }
+
+
+def test_openrouter_vision_parses_nested_and_plain_json():
+    nested = '{"result": [{"data": {"total_fare": "INR 4,250", "from": "DEL", "to": "BOM"}}]}'
+    assert _fields_from_answer(nested)["price"] == 4250.0
+    assert _fields_from_answer(nested)["origin"] == "DEL"
+    plain = '{"fare": 1299.0, "date": "2026-09-14"}'
+    assert _fields_from_answer(plain)["price"] == 1299.0
+
+
+def test_vlm_service_default_backend_reads_env():
+    import os
+
+    old = os.environ.get("EXTRACTION_VLM_BACKEND")
+    os.environ["EXTRACTION_VLM_BACKEND"] = "openrouter"
+    try:
+        svc = VLMService()
+        assert svc.prefer == "openrouter"
+        assert "openrouter" in svc.backends
+    finally:
+        if old is None:
+            os.environ.pop("EXTRACTION_VLM_BACKEND", None)
+        else:
+            os.environ["EXTRACTION_VLM_BACKEND"] = old

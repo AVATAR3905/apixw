@@ -60,7 +60,7 @@ collection:
         name: "Akasa Air"
         ndc_endpoint: null
         rate_limit_rpm: 20
-    advance_days: [1, 7, 14, 15, 30, 45]
+    advance_days: [1, 7, 15, 30, 45]
     routes: ["DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "DEL-HYD", "BOM-MAA", "BLR-HYD", "DEL-MAA", "DEL-IXS", "DEL-DHM"]
     browser_pool_size: 4
     headless: true
@@ -99,7 +99,7 @@ collection:
         source_id: 12
         convenience_fee: 0.0
         rate_limit_rpm: 5
-    advance_days: [1, 7, 14, 15, 30, 45]
+    advance_days: [1, 7, 15, 30, 45]
     routes: ["DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "DEL-HYD", "BOM-MAA", "BLR-HYD", "DEL-MAA", "DEL-IXS", "DEL-DHM"]
     headless: true
 

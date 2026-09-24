@@ -208,6 +208,35 @@ class RepresentativePriceEstimator:
                 rep_price = float(np.mean(trimmed))
             else:
                 rep_price = float(np.median(outlier_filtered_prices))
+        elif est_upper == "ENSEMBLE":
+            # Multi-source ensemble (Phase 5): feed-quality-weighted median of the
+            # per-carrier minimum fares. Carrier-direct samples receive full weight,
+            # OTA_AGGREGATOR samples are downweighted (0.7) and synthetic baselines
+            # heavily discounted (0.3), so the consensus price resists a single
+            # low-quality feed while still hearing every platform.
+            carrier_codes = list(carrier_min_fares.keys())
+            weights = np.array(
+                [carrier_feed_info[c]["feed_quality"] for c in carrier_codes],
+                dtype=np.float64,
+            )
+            survivor_vals = set(outlier_filtered_prices.tolist())
+            keep = np.array([p in survivor_vals for p in carrier_prices_arr], dtype=bool)
+            if keep.sum() > 0:
+                ensemble_prices = carrier_prices_arr[keep]
+                ensemble_weights = weights[keep]
+            else:
+                ensemble_prices = carrier_prices_arr
+                ensemble_weights = weights
+            if len(ensemble_weights) > 0 and ensemble_weights.sum() > 0:
+                order = np.argsort(ensemble_prices)
+                sorted_prices = ensemble_prices[order]
+                sorted_weights = ensemble_weights[order]
+                cum = np.cumsum(sorted_weights)
+                unit = cum[-1] / 2.0
+                crossing = np.searchsorted(cum, unit, side="left")
+                rep_price = float(sorted_prices[min(crossing, len(sorted_prices) - 1)])
+            else:
+                rep_price = float(np.median(ensemble_prices))
         else:
             rep_price = float(np.median(outlier_filtered_prices))
 

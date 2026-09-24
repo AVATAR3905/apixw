@@ -3,7 +3,6 @@
 Complies with PRD Section 11-13: Ethical collection, rate limiting, robots.txt compliance,
 raw payload audit, and 5-part fare decomposition (base fare, fuel surcharge, GST, UDF/ADF, convenience fee).
 """
-
 import datetime
 import logging
 import os
@@ -13,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from packages.shared.time_utils import utcnow
 from services.collectors.circuit_breaker import get_circuit_breaker
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ class CarrierDirectScraper(ABC):
         """Stores raw payload with SHA-256 hash for audit compliance."""
         import hashlib
         import json
-        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"{self.carrier_code}_{origin}_{dest}_{travel_date.isoformat()}_{ts}.json"
         filepath = os.path.join(self.raw_dir, filename)
 

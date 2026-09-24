@@ -5,19 +5,24 @@ from packages.statistics.benchmark_matcher import BenchmarkMatcherService
 
 
 def test_mospi_benchmark_csv_ingestion():
-    """Verifies that MoSPI CPI benchmark CSV is ingested and persisted to database."""
+    """Verifies that MoSPI CPI benchmark CSV is ingested and persisted to database.
+
+    Real data: 6 months (Jan/Feb/Mar/Apr/Jun/Jul 2026, May missing) of MoSPI's
+    revised 2024=100 CPI item 07.3 "Passenger transport services" (Combined),
+    transcribed from the official monthly Press Release PDFs on mospi.gov.in.
+    """
     db = SessionLocal()
     try:
         records = BenchmarkMatcherService.ingest_mospi_benchmark_csv(db)
-        assert len(records) == 20
-        assert all(str(r.base_year) == "2012" for r in records)
+        assert len(records) == 6
+        assert all(str(r.base_year) == "2024" for r in records)
 
         # Query series
         series = BenchmarkMatcherService.get_benchmark_series(db)
-        assert len(series) == 20
+        assert len(series) == 6
         # Check chronological ordering
-        assert series[0]["period"] == "2025-01"
-        assert series[-1]["period"] == "2026-08"
+        assert series[0]["period"] == "2026-01"
+        assert series[-1]["period"] == "2026-07"
 
     finally:
         db.close()

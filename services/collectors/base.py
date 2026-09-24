@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import CollectionJob, FareObservation, Route, Source
+from packages.shared.time_utils import utcnow
 from packages.statistics.normalizer import FareNormalizer
 from packages.statistics.quality import QualityEngine
 from services.collectors.circuit_breaker import (
@@ -101,7 +102,7 @@ class BaseConnector(ABC):
             )
 
         job.status = "RUNNING"
-        job.started_at = datetime.datetime.now(datetime.UTC)
+        job.started_at = utcnow()
         db.commit()
 
         start_time = time.time()
@@ -186,7 +187,7 @@ class BaseConnector(ABC):
                 db.add(db_obs)
 
             job.status = "COMPLETED"
-            job.completed_at = datetime.datetime.now(datetime.UTC)
+            job.completed_at = utcnow()
             db.commit()
 
             # Step 5: Emit telemetry
@@ -212,7 +213,7 @@ class BaseConnector(ABC):
             latency_ms = round((time.time() - start_time) * 1000.0, 1)
             err_code = getattr(e, "code", CollectorErrorCode.UNKNOWN.value)
             job.status = "FAILED"
-            job.completed_at = datetime.datetime.now(datetime.UTC)
+            job.completed_at = utcnow()
             job.error_code = str(err_code)
             job.error_message = str(e)
             db.commit()

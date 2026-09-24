@@ -17,18 +17,29 @@
 +-----------------------------------------------------------------------------------+
 |                        ACCESS CONTROL & RATE LIMITING                             |
 |  Sliding Window IP Limiter (120 req/min API, 20 req/min Export endpoints)         |
+|  X-RateLimit-* headers; 429 + Retry-After; exempts /, /health, /docs*, /redoc,   |
+|  /openapi.json and /ui* viewer paths                                              |
 +-----------------------------------------------------------------------------------+
                                          |
                                          v
 +-----------------------------------------------------------------------------------+
 |                           STATISTICAL COMPUTATION ENGINE                          |
 |  - Lowest-Economy Estimator (packages/statistics/estimators.py)                   |
+|  - ENSEMBLE feed-quality-weighted median estimator (same module, weight map:      |
+|    CARRIER_DIRECT 1.0 / RPC 0.9 / OTA 0.7 / SYNTHETIC 0.3)                        |
 |  - DGCA Passenger Weight Engine (packages/statistics/weights.py)                  |
-|  - Daily Laspeyres Index Engine (services/index_engine/calculator_service.py)     |
+|  - Daily Hybrid Laspeyres-Jevons Index (services/index_engine/calculator_service) |
+|    + Dual-Series: HEADLINE (all travel dates) vs CORE (festival-guarded,          |
+|      re-anchoring _find_core_anchor, continuity-gated)                            |
 |  - Temporal Aggregations: Weekly & Monthly (temporal_aggregations.py)             |
 |  - MoSPI Directional Co-Movement Matcher (benchmark_matcher.py)                   |
+|  - DGCA Monthly Benchmark Comparator (services/validation/dgca_benchmark_comp...) |
 |  - ATF Jet Fuel Macro Context Engine (fuel_context.py)                            |
-|  - Anomaly/Surge Detection (packages/statistics/volatility.py, drift_detector.py) |
+|  - OTA Source-Pair Markup Auditor (source_pair_auditor.py)                        |
+|  - Feed-Cohort Correlation Tracker (source_correlation.py, Pearson r per route)   |
+|  - IQR/MAD Anomaly Detector + Escalation (anomaly_detector.py, anomaly_service.py)|
+|  - Confidence Scoring (confidence.py: composite quality x feed trust + band)      |
+|  - Volatility/Surge + Feed Drift (volatility.py, drift_detector.py)               |
 |  - Forecast Ensemble (services/ml/): TimesFM 2.5 50% + LightGBM/Conformal 35% +   |
 |    Statistical STL+ARIMA 15% (services/ml/forecast_service/)                      |
 |  - Forecast Backtesting (forecast_snapshots -> /forecast/accuracy vs realized)   |
@@ -38,6 +49,8 @@
 +-----------------------------------------------------------------------------------+
 |                         DATA QUALITY GATE (PRD SEC 62)                            |
 |  Cabin class filter (Economy Y), Price range bounds, Route matching, Deduplication|
+|  - Per-quote feed tagging (feed_type: CARRIER_DIRECT / RPC_FALLBACK /             |
+|    OTA_AGGREGATOR / SYNTHETIC_BASELINE) for OTA quotes from the 6 aggregators     |
 +-----------------------------------------------------------------------------------+
                                          |
                                          v
@@ -55,22 +68,30 @@
 +-----------------------------------------------------------------------------------+
 |                             STORAGE & PERSISTENCE                                 |
 |  Dual-Engine: PostgreSQL/TimescaleDB with automatic fallback to local SQLite      |
-|  17 Normalized Tables: routes, airlines, fare_observations, index_values,         |
-|  route_volatility_records, carrier_indices, validation_results, forecast_        |
+|  21 Normalized Tables: routes, airlines, fare_observations, index_values,         |
+|  route_volatility_records, discrepancy_audits (+audit_type/source-pair columns),  |
+|  dgca_monthly_fares, validation_results, source_correlations, anomaly_events,     |
+|  benchmark_values, atf_prices, atf_tax_rates, carrier_indices, forecast_          |
 |  snapshots (persisted forecasts for accuracy backtesting), etc.                  |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 1a. REST API Surface (4 Routers)
+## 1a. REST API Surface (5 Routers)
 
 | Router | Prefix | Endpoints |
 |---|---|---|
-| `apps/api/routers/api_v1.py` | `/api/v1` | index, index/timeseries, index/monthly, forecast, forecast/all, forecast/history-and-forecast, forecast/accuracy (backtest vs realized), weights, routes, routes/{route_code}, lead-time, validation, data-quality, validation/cross-feed, live/collect, collection/trigger-cycle, source-health, fuel-context, methodology, analytics/carrier-inflation{/timeseries}, analytics/volatility{/{route_code}} |
-| `apps/api/routers/exports.py` | `/api/v1/export` | daily-index.csv, daily-index.json, basket-weights.csv, route-observations.csv |
+| `apps/api/routers/api_v1.py` | `/api/v1` | index (HEADLINE\|CORE via `series_type`), index/timeseries, index/dual-series, index/monthly, forecast, forecast/all, forecast/history-and-forecast, forecast/accuracy (backtest vs realized), weights, routes, routes/{route_code}, lead-time, validation, validation/dgca, data-quality, validation/cross-feed, validation/source-pair, ota/source-pair-audit, validation/source-correlation, validation/compute-source-correlation, analytics/anomalies, analytics/run-anomaly-detection, live/collect, collection/trigger-cycle, source-health, fuel-context, methodology, analytics/carrier-inflation{/timeseries}, analytics/volatility{/{route_code}}, analytics/market-briefing, **Governance & Policy Intelligence (v2.2)**: analytics/policy-signal, analytics/leading-indicator, analytics/alerts, analytics/concentration{/{route_code}}, analytics/intraday-volatility{/{route_code}}, analytics/availability-adjusted, analytics/udan |
+| `apps/api/routers/apix_ui.py` | `/` root level | **New frontend bridge**: `/routes`, `/index`, `/index/headline`, `/fares/cleaned`, `/analytics/heatmap`, `/analytics/elasticity`, `/backtest`, `/ingest/dummy` — adapter router that serves the new APIx UI (`apps/api/static_ui/index.html` mounted at `/ui`) directly from the local SQLite observatory DB |
+| `apps/api/routers/exports.py` | `/api/v1/export` | daily-index.csv (dual-series header `date,index_series,series_type,...`), daily-index.json, basket-weights.csv, route-observations.csv |
 | `apps/api/routers/ai_router.py` | `/api/v1/ai` | pre-made-prompts, query (OpenRouter econometric copilot) |
 | `apps/api/routers/ota_router.py` | `/api/v1/ota` | common-flights, dispersion-ranking, sources-status (Multi-OTA comparison) |
+
+> **v2.2 — Governance & Policy Intelligence** endpoints are implemented in
+> `packages/statistics/` (`policy_signal.py`, `leading_indicator.py`, `anomaly_explainer.py`,
+> `concentration.py`, `intraday_volatility.py`, `availability_index.py`, `udan_monitor.py`)
+> and wired into `api_v1.py` under the OpenAPI tag **"Governance & Policy Intelligence"**.
 
 ---
 
@@ -78,14 +99,29 @@
 - **Source Registry:** Implements a strict permission state machine (`DISCOVERED` $\rightarrow$ `REVIEW_REQUIRED` $\rightarrow$ `APPROVED` $\rightarrow$ `ACTIVE`). Unapproved sources cannot be scheduled.
 - **Circuit Breaker:** Tracks consecutive errors per source. Trips from `CLOSED` to `OPEN` after 5 failures, protecting upstream airline servers and system reliability.
 - **Payload Immutability:** Raw API/HTML responses are saved with SHA-256 hashes in `data/raw/` before parsing. Tamper detection guarantees scientific reproducibility.
+- **Dual-Feed Design:** Every corridor is collected from two independent feeds — airline direct booking portals (priority) and Google Flights RPC (validator/fallback) — and reconciled by `CrossFeedDiscrepancyValidator` before persistence. In v2.1 this is extended to a **multi-OTA design**: six OTA aggregates (`BaseOTAScraper.FEED_TYPE="OTA_AGGREGATOR"`) are ingested alongside the direct feed and feed-tagged at normalize time so `SourcePairAuditor` can price each OTA against the authoritative carrier-direct reference. See [docs/SCRAPING_OCR_VLM.md](docs/SCRAPING_OCR_VLM.md).
+- **SCRAPE_MODE gating:** `packages/shared/config.py` switches the whole collector suite between network and deterministic behaviour at runtime:
+  - `live` — both feeds hit the network (production/rehearsal);
+  - `calibrated` — both feeds use deterministic offline baselines (presentations without network, hermetic tests);
+  - `hybrid` — **recommended for demos**: carrier gates serve the fast calibrated baseline while the RPC feed hits real Google Flights, so the parity/markup table is populated with genuine aggregator prices (~3s).
+
+## 2a. Extraction Layer (OCR & VLM)
+- **OCR:** `services/extraction/ocr_service.py` wraps PaddleOCR **PP-OCRv6** (lazy import, mtime-keyed inference memo so repeated strip reads cost one real pass). `layout_clusterer.py` groups tokens into per-flight cards by y-band geometry; `adaptive_extractor.py` parses fields (price/route/airline/flight/times/stops/duration) with deterministic regexes.
+- **VLM:** `services/extraction/vlm_service.py` — local **PaddleOCR-VL-1.6 (0.9B)** preferred (`~106s`/image, fully offline, weights cached under `~\.paddlex\official_models`) with **OpenRouter** vision as the network fallback.
+- **Adaptive chain:** DOM $\rightarrow$ OCR $\rightarrow$ VLM (VLM only escalates for fields OCR couldn't resolve). `AdaptiveExtractor(allow_vlm=False)` pins VLM off in the carrier-scraper OCR fallback so live scraping stays responsive.
 
 ---
 
 ## 3. Statistical Calculation Pipeline
-1. **Raw Collection:** Collects lowest quotes across 5 horizons ($T+1, T+7, T+15, T+30, T+45$).
+1. **Raw Collection:** Collects lowest quotes across 5 horizons ($T+1, T+7, T+15, T+30, T+45$) from Carrier Direct, 6 OTAs, and the Google-Flights RPC validator, each quote tagged with its `feed_type`.
 2. **Quality Verification:** Rule-based filtering (PRD Sec 62) drops invalid fares, anomalies, and duplicates.
-3. **Representative Price:** For each route, carrier, and date, the lowest economy fare is selected. The cross-carrier median represents the route price $P_{j,t,15}$.
+3. **Representative Price:** For each route, carrier, and date, the lowest economy fare is selected. The route cell price is the **Jevons geometric mean** across carriers (see METHODOLOGY.md §1.1); the optional **ENSEMBLE** estimator applies a feed-quality-weighted median. MAD + IQR outlier filters run before aggregation.
 4. **DGCA Route Weighting:** Aggregates bidirectional passenger traffic across 10 corridors, strictly normalized so $\sum w_j = 1.000000$.
-5. **Headline Index Calculation:** Computed using the Modified Laspeyres formulation anchored at $T+15$.
-6. **Benchmark Validation:** Frequency-matched monthly aggregation evaluated against official MoSPI CPI Airfare series.
-7. **Forecast & Anomaly Extensions:** Ensemble forecast engine (TimesFM 2.5 + LightGBM conformal + STL/ARIMA) produces 28-day (past 28d observed + future 28d) projections with P10/P50/P90 confidence bands; volatility engine flags corridor surge alerts (`CALM` / `MODERATE` / `HIGH_VOLATILITY` / `SURGE_ALERT`).
+5. **Headline Index Calculation:** Computed using the Hybrid Laspeyres–Jevons formulation anchored at $T+15$; produced as two series — **HEADLINE** (all travel dates) and **CORE** (festival-guarded continuity series with `_find_core_anchor` re-anchoring).
+6. **Benchmark Validation:** Frequency-matched monthly aggregation evaluated against official MoSPI CPI Airfare series (`benchmark_matcher.py`) and against DGCA monthly fare statistics (`dgca_benchmark_comparator.py`, `GET /validation/dgca`).
+7. **Data-Quality & Audit Layers (v2.1):**
+   - **OTA source-pair markup audits** — `SourcePairAuditor` compares each OTA against the authoritative reference (carrier-direct when present, else cheapest), persists `OTA_SOURCE_PAIR` rows, `GET /validation/source-pair`.
+   - **Feed-cohort correlation** — `SourceCorrelationTracker` computes rolling Pearson r between CARRIER_DIRECT and OTA_AGGREGATOR series; `r < 0.7` flags divergence, `GET /validation/source-correlation`.
+8. **Anomaly Detection & Alerting (v2.1):** `anomaly_detector.py` scores each index point with IQR fences + MAD z-scores, applies a 2% practical-significance floor, classifies `LOW/MODERATE/SEVERE`, and escalates (SEVERE, or ≥2 consecutive MODERATE). Hits persist as `anomaly_events`; `GET /analytics/anomalies`, `POST /analytics/run-anomaly-detection`.
+9. **Confidence Scores (v2.1):** `confidence.py` computes a 0–100 composite (quality × extraction-method trust, + cross-source agreement) mapped to HIGH/MEDIUM/LOW bands; `/api/v1/index` returns `confidence_score`, `confidence_band`, and `outlier_count`.
+10. **Forecast & Anomaly Extensions:** Ensemble forecast engine (TimesFM 2.5 + LightGBM conformal + STL/ARIMA) produces 28-day (past 28d observed + future 28d) projections with P10/P50/P90 confidence bands; volatility engine flags corridor surge alerts (`CALM` / `MODERATE` / `HIGH_VOLATILITY` / `SURGE_ALERT`).

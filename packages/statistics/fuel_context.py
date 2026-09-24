@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import ATFPrice, ATFTaxRate, IndexValue
+from packages.shared.time_utils import utcnow
 
 
 class ATFContextService:
@@ -47,7 +48,7 @@ class ATFContextService:
                     date=dt,
                     price_per_kl=price,
                     source=source,
-                    created_at=datetime.datetime.now(datetime.UTC),
+                    created_at=utcnow(),
                 )
                 db.add(rec)
                 created.append(rec)
@@ -84,7 +85,7 @@ class ATFContextService:
                     tax_type=tax_type,
                     rate=rate,
                     source=source,
-                    created_at=datetime.datetime.now(datetime.UTC),
+                    created_at=utcnow(),
                 )
                 db.add(rec)
                 created.append(rec)
@@ -127,7 +128,7 @@ class ATFContextService:
             headline_idx = (
                 db.query(IndexValue)
                 .filter(
-                    IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]),
+                    IndexValue.index_type.in_(["HEADLINE_T15"]),
                     IndexValue.index_series == "BASE_FARE",
                     IndexValue.period_start == fr.date,
                     IndexValue.route_id.is_(None),

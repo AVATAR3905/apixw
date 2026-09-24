@@ -26,7 +26,7 @@ class ObservatoryMatrixSerializer:
             db.query(IndexValue)
             .filter(
                 IndexValue.index_series == "BASE_FARE",
-                IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]),
+                IndexValue.index_type.in_(["HEADLINE_T15"]),
                 IndexValue.route_id.is_(None),
             )
             .order_by(IndexValue.period_start.desc())

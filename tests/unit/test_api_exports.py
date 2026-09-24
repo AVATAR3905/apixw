@@ -13,8 +13,8 @@ def test_export_daily_index_csv():
     assert res.status_code == 200
     assert "text/csv" in res.headers["content-type"]
     assert "attachment" in res.headers["content-disposition"]
-    assert "date,index_series,index_type" in res.text
-    assert ("HEADLINE_T15" in res.text) or ("HEADLINE_T14" in res.text)
+    assert "date,index_series,series_type,index_type" in res.text
+    assert "HEADLINE_T15" in res.text
 
 
 def test_export_daily_index_json():

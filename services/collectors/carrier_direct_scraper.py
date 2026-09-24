@@ -17,12 +17,50 @@ from playwright.async_api import async_playwright
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import RawPayload, Source
+from packages.shared.time_utils import utcnow
 from services.collectors.browser_pool import BrowserUnavailable, get_browser_pool
 from services.collectors.circuit_breaker import (
     CircuitBreaker,
 )
+from services.collectors.ethical_scraping import RobotsTxtChecker
 
 logger = logging.getLogger(__name__)
+
+# One shared robots.txt checker (per-domain cache) for every carrier-direct request.
+_ROBOTS_CHECKER = RobotsTxtChecker()
+
+# Case-insensitive substrings that indicate a bot-challenge / block page rather
+# than genuine search results. Detected on rendered body text and on any
+# 403/429/503 HTTP status so a challenge page is never mistaken for "no fares".
+_BLOCK_PAGE_MARKERS = (
+    "captcha", "recaptcha", "hcaptcha", "cloudflare", "are you a human",
+    "unusual traffic", "access denied", "request blocked", "bot detection",
+    "verify you are human",
+)
+
+# Real per-carrier search-URL builders. Only SpiceJet's is verified against a
+# live network-JSON response in this codebase (see `_SPICEJET_AVAILABILITY_PATH`
+# below); the others route to the carrier's *own* domain (fixing a bug where
+# every non-SG/6E carrier silently searched spicejet.com) but their DOM/XHR
+# layout has not been reverse-engineered here, so they rely on the generic
+# DOM/OCR/calibrated degrade chain.
+_CARRIER_SEARCH_URLS = {
+    "SG": lambda o, d, t: f"https://www.spicejet.com/search?from={o}&to={d}&tripType=1&departure={t}&adult=1",
+    "6E": lambda o, d, t: f"https://www.goindigo.in/flight-booking.html?origin={o}&destination={d}&date={t}",
+    "AI": lambda o, d, t: f"https://www.airindia.com/en-in/book/select-flights?tripType=ONE_WAY&origin={o}&destination={d}&departDate={t}&adult=1",
+    "QP": lambda o, d, t: f"https://www.akasaair.com/flight-search?tripType=O&origin={o}&destination={d}&departureDate={t}&adultCount=1&childCount=0&infantCount=0&cabinType=Economy",
+    "IX": lambda o, d, t: f"https://www.airindiaexpress.com/book/flight-select?tripType=O&origin={o}&destination={d}&departDate={t}&adult=1",
+}
+
+_CARRIER_DOMAINS = {
+    "SG": "www.spicejet.com",
+    "6E": "www.goindigo.in",
+    "AI": "www.airindia.com",
+    "QP": "www.akasaair.com",
+    "IX": "www.airindiaexpress.com",
+}
+
+_SPICEJET_AVAILABILITY_PATH = "api/v3/search/availability"
 
 
 class CarrierDirectScraper:
@@ -53,12 +91,32 @@ class CarrierDirectScraper:
         Scrapes direct quotes for a carrier and corridor on a given horizon.
         Prefers an idle pooled browser context, falls back to a dedicated
         Playwright launch, then to the calibrated direct baseline.
+
+        Under ``SCRAPE_MODE=calibrated`` (presentations/offline demos) the
+        network/browser/OCR/VLM path is skipped entirely and the deterministic
+        calibrated baseline is served immediately. Under ``SCRAPE_MODE=hybrid``
+        the same deterministic baseline is served while the RPC feed goes live.
         """
         if search_date is None:
             search_date = datetime.date.today()
 
         travel_date = search_date + datetime.timedelta(days=advance_days)
         origin, dest = origin_airport.upper(), destination_airport.upper()
+
+        from packages.shared.config import settings
+
+        if settings.SCRAPE_MODE in ("calibrated", "hybrid"):
+            logger.info(
+                "SCRAPE_MODE=%s: serving deterministic calibrated baseline for %s %s->%s",
+                settings.SCRAPE_MODE, carrier_code, origin, dest,
+            )
+            return self._generate_authoritative_carrier_quotes(
+                carrier_code=carrier_code,
+                origin=origin,
+                dest=dest,
+                travel_date=travel_date,
+                advance_days=advance_days,
+            )
 
         pool = get_browser_pool()
         try:
@@ -160,100 +218,304 @@ class CarrierDirectScraper:
         advance_days: int,
         db: Optional[Session] = None,
     ) -> List[Dict[str, Any]]:
-        """DOM harvest + screen-OCR extraction on a shared browser context."""
+        """Network-JSON / DOM harvest + screen-OCR extraction on a shared browser context.
+
+        Every request is gated by robots.txt (real ``urllib.robotparser`` check,
+        not a hardcoded path list) and every response is screened for a
+        bot-challenge page before being trusted as "no fares available".
+        """
+        code = carrier_code.upper()
         quotes: List[Dict[str, Any]] = []
         travel_date_str = travel_date.isoformat()
+
+        url_builder = _CARRIER_SEARCH_URLS.get(code, _CARRIER_SEARCH_URLS["SG"])
+        target_url = url_builder(origin, dest, travel_date_str)
+
+        if not _ROBOTS_CHECKER.can_fetch(target_url):
+            logger.warning("robots.txt disallows %s for %s; skipping live scrape.", target_url, code)
+            self._store_raw_payload(db, [], carrier_code, origin, dest, travel_date_str)
+            return []
+
         page = await context.new_page()
-
-        # URL formatting per carrier
-        if carrier_code.upper() == "SG":
-            target_url = (
-                f"https://www.spicejet.com/search?from={origin}&to={dest}"
-                f"&tripType=1&departure={travel_date_str}&adult=1"
-            )
-        elif carrier_code.upper() == "6E":
-            target_url = (
-                f"https://www.goindigo.in/flight-booking.html?origin={origin}&destination={dest}"
-                f"&date={travel_date_str}"
-            )
-        else:
-            target_url = f"https://www.spicejet.com/search?from={origin}&to={dest}&departure={travel_date_str}"
-
         screenshot_path = None
-        try:
-            # Intercept JSON responses
-            api_responses = []
+        blocked = False
+        api_responses: List[Dict[str, Any]] = []
 
+        try:
             async def handle_response(res):
                 try:
                     ct = res.headers.get("content-type", "")
-                    if "json" in ct:
-                        body = await res.json()
-                        api_responses.append(body)
+                    if "json" in ct and res.request.resource_type in ("xhr", "fetch"):
+                        api_responses.append({"url": res.url, "body": await res.json()})
                 except Exception:
                     pass
 
             page.on("response", handle_response)
-            await page.goto(target_url, wait_until="domcontentloaded", timeout=12000)
-            await page.wait_for_timeout(2000)
+            resp = await page.goto(target_url, wait_until="domcontentloaded", timeout=15000)
+            await page.wait_for_timeout(3000)
 
-            # Extract price cards if rendered or check intercepted JSON
+            if resp is not None and resp.status in (403, 429, 503):
+                blocked = True
+            else:
+                body_lower = (await page.inner_text("body"))[:4000].lower()
+                if any(marker in body_lower for marker in _BLOCK_PAGE_MARKERS):
+                    blocked = True
+
+            if blocked:
+                logger.warning("Bot-challenge / block page detected for %s at %s", code, target_url)
+            elif code == "SG":
+                quotes = self._parse_spicejet_availability(
+                    api_responses, origin, dest, travel_date_str, advance_days
+                )
+            else:
+                # Generic path for carriers without a verified JSON schema:
+                # try structured DOM price cards first, then any intercepted
+                # JSON payload that looks like it carries fare amounts.
+                quotes = await self._extract_generic_dom_prices(
+                    page, code, origin, dest, travel_date_str, advance_days
+                )
+                if not quotes:
+                    quotes = self._extract_generic_json_prices(
+                        api_responses, code, origin, dest, travel_date_str, advance_days
+                    )
+
+            if not quotes and not blocked:
+                screenshot_path = await self._capture_screenshot(
+                    page, carrier_code, origin, dest, travel_date_str
+                )
+
+        except Exception as e:
+            logger.warning("Live navigation failed for %s (%s): %s", code, target_url, e)
+
+        # OCR is the next live production stage when DOM/JSON produced nothing
+        # (canvas rendering) and no bot-challenge was seen. Skipped entirely on
+        # a detected block, since OCR-ing a CAPTCHA page cannot yield a fare.
+        if not quotes and not blocked:
+            quotes = self._extract_via_ocr(
+                carrier_code, origin, dest, travel_date_str, advance_days, screenshot_path
+            )
+
+        if not quotes:
+            quotes = self._generate_authoritative_carrier_quotes(
+                carrier_code=carrier_code,
+                origin=origin,
+                dest=dest,
+                travel_date=travel_date,
+                advance_days=advance_days,
+            )
+
+        self._store_raw_payload(db, quotes, carrier_code, origin, dest, travel_date_str)
+        return quotes
+
+    def _parse_spicejet_availability(
+        self,
+        api_responses: List[Dict[str, Any]],
+        origin: str,
+        dest: str,
+        travel_date_str: str,
+        advance_days: int,
+    ) -> List[Dict[str, Any]]:
+        """Parses SpiceJet's real ``api/v3/search/availability`` XHR response.
+
+        Verified live shape (2026-09): ``data.trips[].journeysAvailable[]`` lists
+        each flight (segment identifier = flight number, carrier code, times);
+        each journey's ``fares`` dict keys into the sibling ``data.faresAvailable``
+        catalog, whose entries carry ``passengerFares[0]`` with ``fareAmount``
+        (total) and ``publishedFare``/``revenueFare`` (carrier base component).
+        """
+        quotes: List[Dict[str, Any]] = []
+        payload = None
+        for entry in api_responses:
+            if _SPICEJET_AVAILABILITY_PATH in entry.get("url", ""):
+                payload = entry.get("body")
+                break
+        if not payload:
+            return quotes
+
+        try:
+            data = payload.get("data", {})
+            fares_catalog = data.get("faresAvailable", {})
+            trips = data.get("trips", [])
+        except AttributeError:
+            return quotes
+
+        for trip in trips:
+            for journey in trip.get("journeysAvailable", []):
+                designator = journey.get("designator", {})
+                segments = journey.get("segments", [])
+                fare_keys = list(journey.get("fares", {}).keys())
+                if not fare_keys:
+                    continue
+
+                # Fare-mix protection at the source: pick the cheapest fare
+                # option for this specific flight (lowest available economy).
+                best_amount = None
+                best_base = None
+                for key in fare_keys:
+                    fare_entry = fares_catalog.get(key)
+                    if not fare_entry:
+                        continue
+                    passenger_fares = fare_entry.get("passengerFares") or []
+                    adult_fare = next(
+                        (pf for pf in passenger_fares if pf.get("passengerType") == "ADT"),
+                        passenger_fares[0] if passenger_fares else None,
+                    )
+                    if not adult_fare:
+                        continue
+                    amount = adult_fare.get("fareAmount")
+                    base = adult_fare.get("publishedFare") or adult_fare.get("revenueFare")
+                    if amount is None:
+                        continue
+                    if best_amount is None or amount < best_amount:
+                        best_amount, best_base = amount, base
+
+                if best_amount is None or not (1500 <= best_amount <= 60000):
+                    continue
+
+                flight_no = None
+                carrier_code = "SG"
+                if segments:
+                    ident = segments[0].get("identifier", {})
+                    carrier_code = ident.get("carrierCode", "SG")
+                    flight_no = ident.get("identifier")
+
+                base_fare = float(best_base) if best_base is not None else round(best_amount * 0.76, 2)
+                surcharge_bucket = round(float(best_amount) - base_fare, 2)
+
+                quotes.append(
+                    {
+                        "source": "CARRIER_DIRECT",
+                        "carrier_code": carrier_code,
+                        "carrier_name": self._carrier_name(carrier_code),
+                        "origin_airport": designator.get("origin", origin),
+                        "destination_airport": designator.get("destination", dest),
+                        "travel_date": travel_date_str,
+                        "advance_purchase_days": advance_days,
+                        "flight_number": f"{carrier_code}-{flight_no}" if flight_no else f"{carrier_code}-101",
+                        "departure_time": (designator.get("departure") or "")[11:16] or "00:00",
+                        "arrival_time": (designator.get("arrival") or "")[11:16] or None,
+                        "stops": max(0, len(segments) - 1),
+                        "base_fare": base_fare,
+                        # SpiceJet's public response separates base vs total but does
+                        # not itemize fuel/GST/UDF/convenience individually, so the
+                        # remainder is carried as a single carrier-added bucket
+                        # (tax_amount) rather than guessed at with a fixed formula.
+                        "fuel_surcharge": 0.0,
+                        "tax_amount": surcharge_bucket,
+                        "development_fee": 0.0,
+                        "convenience_fee": 0.0,
+                        "total_fare": float(best_amount),
+                        "cabin_class": "ECONOMY",
+                        "fare_family": "BASIC",
+                        "feed_type": "CARRIER_DIRECT",
+                        "extraction_method": "NETWORK_API",
+                    }
+                )
+
+        return quotes
+
+    async def _extract_generic_dom_prices(
+        self,
+        page,
+        carrier_code: str,
+        origin: str,
+        dest: str,
+        travel_date_str: str,
+        advance_days: int,
+    ) -> List[Dict[str, Any]]:
+        """Best-effort DOM price-card scrape for carriers without a verified schema."""
+        quotes: List[Dict[str, Any]] = []
+        try:
             price_elements = await page.query_selector_all(
-                "[data-testid*='fare'], .fare-price, .price, [class*='flight-price']"
+                "[data-testid*='fare'], [data-testid*='price'], .fare-price, .price, "
+                "[class*='flight-price'], [class*='fareAmount'], [class*='FareAmount']"
             )
             for idx, el in enumerate(price_elements[:6]):
                 txt = await el.inner_text()
                 txt_clean = txt.replace("₹", "").replace(",", "").strip()
                 try:
                     val = float(txt_clean)
-                    if 1500 <= val <= 60000:
-                        f_no = f"{carrier_code.upper()}-{100 + idx * 10 + 1}"
-                        quotes.append(
-                            {
-                                "source": "CARRIER_DIRECT",
-                                "carrier_code": carrier_code.upper(),
-                                "carrier_name": self._carrier_name(carrier_code),
-                                "origin_airport": origin,
-                                "destination_airport": dest,
-                                "travel_date": travel_date_str,
-                                "advance_purchase_days": advance_days,
-                                "flight_number": f_no,
-                                "departure_time": f"{8 + idx * 2:02d}:30",
-                                "stops": 0,
-                                "total_fare": val,
-                                "cabin_class": "ECONOMY",
-                                "fare_family": "BASIC",
-                                "feed_type": "CARRIER_DIRECT",
-                                "extraction_method": "DOM_BROWSER",
-                            }
-                        )
                 except ValueError:
                     continue
-
-            if not quotes:
-                screenshot_path = await self._capture_screenshot(
-                    page, carrier_code, origin, dest, travel_date_str
-                )
-
+                if 1500 <= val <= 60000:
+                    quotes.append(
+                        {
+                            "source": "CARRIER_DIRECT",
+                            "carrier_code": carrier_code,
+                            "carrier_name": self._carrier_name(carrier_code),
+                            "origin_airport": origin,
+                            "destination_airport": dest,
+                            "travel_date": travel_date_str,
+                            "advance_purchase_days": advance_days,
+                            "flight_number": f"{carrier_code}-{100 + idx * 10 + 1}",
+                            "departure_time": f"{8 + idx * 2:02d}:30",
+                            "stops": 0,
+                            "total_fare": val,
+                            "cabin_class": "ECONOMY",
+                            "fare_family": "BASIC",
+                            "feed_type": "CARRIER_DIRECT",
+                            "extraction_method": "DOM_BROWSER",
+                        }
+                    )
         except Exception:
-            pass
+            return []
+        return quotes
 
-        # OCR is the second live production stage when the DOM produced nothing
-        # (canvas rendering, CAPTCHA wall). Degrades to the calibrated baseline.
-        if not quotes:
-            quotes = self._extract_via_ocr(
-                carrier_code, origin, dest, travel_date_str, advance_days, screenshot_path
+    def _extract_generic_json_prices(
+        self,
+        api_responses: List[Dict[str, Any]],
+        carrier_code: str,
+        origin: str,
+        dest: str,
+        travel_date_str: str,
+        advance_days: int,
+    ) -> List[Dict[str, Any]]:
+        """Scans any intercepted XHR JSON for plausible fare-amount fields.
+
+        Unverified generic fallback: looks for common field names
+        (fareAmount/totalFare/totalPrice/grandTotal/amount) with a numeric
+        value inside the valid domestic-fare band, for carriers whose response
+        schema hasn't been individually reverse-engineered.
+        """
+        candidates: List[float] = []
+        field_names = ("fareamount", "totalfare", "totalprice", "grandtotal", "totalamount")
+
+        def _walk(node: Any):
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    if isinstance(v, (int, float)) and k.lower() in field_names:
+                        if 1500 <= v <= 60000:
+                            candidates.append(float(v))
+                    else:
+                        _walk(v)
+            elif isinstance(node, list):
+                for item in node:
+                    _walk(item)
+
+        for entry in api_responses:
+            _walk(entry.get("body"))
+
+        quotes = []
+        for idx, val in enumerate(sorted(set(candidates))[:6]):
+            quotes.append(
+                {
+                    "source": "CARRIER_DIRECT",
+                    "carrier_code": carrier_code,
+                    "carrier_name": self._carrier_name(carrier_code),
+                    "origin_airport": origin,
+                    "destination_airport": dest,
+                    "travel_date": travel_date_str,
+                    "advance_purchase_days": advance_days,
+                    "flight_number": f"{carrier_code}-{100 + idx * 10 + 1}",
+                    "departure_time": f"{8 + idx * 2:02d}:30",
+                    "stops": 0,
+                    "total_fare": val,
+                    "cabin_class": "ECONOMY",
+                    "fare_family": "BASIC",
+                    "feed_type": "CARRIER_DIRECT",
+                    "extraction_method": "NETWORK_JSON_GENERIC",
+                }
             )
-            if not quotes:
-                quotes = self._generate_authoritative_carrier_quotes(
-                    carrier_code=carrier_code,
-                    origin=origin,
-                    dest=dest,
-                    travel_date=travel_date,
-                    advance_days=advance_days,
-                )
-
-        self._store_raw_payload(db, quotes, carrier_code, origin, dest, travel_date_str)
         return quotes
 
     async def _capture_screenshot(
@@ -288,7 +550,10 @@ class CarrierDirectScraper:
                 ExtractionContext,
             )
 
-            result = AdaptiveExtractor().extract(
+            # OCR only in the live scraper: the VLM weight set is far too slow to
+            # load mid-collection for a single screenshot. VLM stays an explicit
+            # offline/verify-stage tool.
+            result = AdaptiveExtractor(allow_vlm=False).extract(
                 ExtractionContext(
                     image_path=screenshot_path,
                     reference_date=date_str,
@@ -431,7 +696,7 @@ class CarrierDirectScraper:
                     payload_uri=filepath,
                     payload_hash=payload_hash,
                     content_type="application/json",
-                    captured_at=datetime.datetime.now(datetime.UTC),
+                    captured_at=utcnow(),
                 )
                 db.add(rp)
                 db.commit()

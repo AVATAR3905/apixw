@@ -27,7 +27,7 @@ class MarketBriefingService:
         headline_row = (
             db.query(IndexValue)
             .filter(
-                IndexValue.index_type.in_(["HEADLINE_T15", "HEADLINE_T14"]),
+                IndexValue.index_type.in_(["HEADLINE_T15"]),
                 IndexValue.index_series == series.upper(),
                 IndexValue.route_id.is_(None),
             )

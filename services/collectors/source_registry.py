@@ -1,11 +1,11 @@
 """Source Registry Service managing compliance states and collection authorization."""
 
-import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import Source
+from packages.shared.time_utils import utcnow
 
 
 class SourceComplianceError(Exception):
@@ -120,7 +120,7 @@ class SourceRegistryService:
         elif target_state in ("DISABLED", "DOWN"):
             source.enabled = False
 
-        source.last_reviewed_at = datetime.datetime.now(datetime.UTC)
+        source.last_reviewed_at = utcnow()
         db.commit()
         db.refresh(source)
         return source
@@ -144,7 +144,7 @@ class SourceRegistryService:
         source.robots_status = robots_status
         source.license_status = license_status
         source.health_status = "APPROVED"
-        source.last_reviewed_at = datetime.datetime.now(datetime.UTC)
+        source.last_reviewed_at = utcnow()
 
         db.commit()
         db.refresh(source)

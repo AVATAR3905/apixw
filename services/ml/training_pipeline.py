@@ -3,13 +3,12 @@
 Trains gradient boosted model for airfare index forecasting with
 rigorous prediction intervals via conformal prediction.
 """
-
 import json
 import logging
 import pickle
 import warnings
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -20,6 +19,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from database.session import SessionLocal
 from packages.schemas.models import IndexValue
+from packages.shared.time_utils import utcnow
 from packages.statistics.weights import DGCAWeightEngine
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -343,7 +343,7 @@ class LightGBMTrainer:
                 "horizons": self.horizons,
                 "params": self.params,
                 "calibration_alpha": self.calibration_alpha,
-                "trained_at": datetime.utcnow().isoformat(),
+                "trained_at": utcnow().isoformat(),
             }, f)
 
     @classmethod

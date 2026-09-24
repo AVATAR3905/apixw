@@ -9,7 +9,11 @@ from starlette.responses import JSONResponse
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    """In-memory sliding window rate limiter per client IP."""
+    """In-memory sliding window rate limiter per client IP.
+
+    Exempts /, /health, /docs*, /redoc, /openapi.json, and /ui* viewer paths.
+    Export paths (/export/*) receive a stricter 20 req/min ceiling.
+    """
 
     def __init__(self, app, requests_per_minute: int = 120):
         super().__init__(app)
@@ -18,8 +22,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.client_records: Dict[str, list] = {}
 
     async def dispatch(self, request: Request, call_next):
-        # Exclude docs, health, and openapi from strict rate limiting
-        if request.url.path in ("/health", "/docs", "/redoc", "/openapi.json", "/"):
+        # Exclude docs, health, static viewer, and openapi from strict rate limiting
+        path = request.url.path
+        if (
+            path in ("/health", "/redoc", "/openapi.json", "/")
+            or path.startswith(("/docs", "/ui"))
+        ):
             return await call_next(request)
 
         client_ip = request.client.host if request.client else "127.0.0.1"

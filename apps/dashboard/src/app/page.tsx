@@ -33,7 +33,7 @@ export default function NationalOverviewPage() {
   const [loading, setLoading] = useState(true);
 
   const [headline, setHeadline] = useState<IndexResponse | null>(null);
-  const [trendData, setTrendData] = useState<Array<{ date: string; baseVal: number; totalVal: number; isForecast?: boolean; p10?: number; p25?: number; p50?: number; p75?: number; p90?: number; modelConfidence?: number }>>([]);
+  const [trendData, setTrendData] = useState<Array<{ date: string; baseVal: number; totalVal: number; isForecast?: boolean; ciLower?: number; ciUpper?: number; p10?: number; p25?: number; p50?: number; p75?: number; p90?: number; modelConfidence?: number }>>([]);
   const [ribbonMap, setRibbonMap] = useState<Record<string, { val: string; change: string }>>({});
   const [corridors, setCorridors] = useState<CorridorItem[]>([]);
   const [quality, setQuality] = useState<DataQualityResponse | null>(null);
@@ -73,12 +73,16 @@ export default function NationalOverviewPage() {
           setHeadline(hData);
           
           if (hfData && hfData.history) {
+            const baseFactor = priceSeries === "TOTAL_PRICE" ? 0.985 : 1.0;
+            const totalFactor = priceSeries === "TOTAL_PRICE" ? 1.0 : 1.015;
             const combined = [
               ...hfData.history.map((h) => ({
                 date: h.date.slice(5),
-                baseVal: priceSeries === "BASE_FARE" ? (h.value ?? 0) : (h.value ?? 0) * 0.985,
-                totalVal: priceSeries === "TOTAL_PRICE" ? (h.value ?? 0) : (h.value ?? 0) * 1.015,
+                baseVal: (h.value ?? 0) * baseFactor,
+                totalVal: (h.value ?? 0) * totalFactor,
                 isForecast: h.type === "forecast",
+                ciLower: h.ci_lower != null ? h.ci_lower * baseFactor : undefined,
+                ciUpper: h.ci_upper != null ? h.ci_upper * baseFactor : undefined,
                 p10: h.p10,
                 p25: h.p25,
                 p50: h.p50,
@@ -88,8 +92,8 @@ export default function NationalOverviewPage() {
               })),
               ...hfData.forecast.map((f) => ({
                 date: f.date.slice(5),
-                baseVal: priceSeries === "BASE_FARE" ? (f.p50 ?? 0) : (f.p50 ?? 0) * 0.985,
-                totalVal: priceSeries === "TOTAL_PRICE" ? (f.p50 ?? 0) : (f.p50 ?? 0) * 1.015,
+                baseVal: (f.p50 ?? 0) * baseFactor,
+                totalVal: (f.p50 ?? 0) * totalFactor,
                 isForecast: true,
                 p10: f.p10,
                 p25: f.p25,
@@ -144,6 +148,14 @@ export default function NationalOverviewPage() {
   const vsBasePct = (currentVal - 100).toFixed(2);
   const yKey = priceSeries === "BASE_FARE" ? "baseVal" : "totalVal";
 
+  const headlineSe = headline?.standard_error != null ? headline.standard_error : null;
+  const headlineCiLower = headline?.index_ci_lower != null ? headline.index_ci_lower : null;
+  const headlineCiUpper = headline?.index_ci_upper != null ? headline.index_ci_upper : null;
+  const headlineCiLabel =
+    headlineCiLower != null && headlineCiUpper != null
+      ? `95% CI ${headlineCiLower.toFixed(2)}–${headlineCiUpper.toFixed(2)}`
+      : `Base 2026-08-01 = 100`;
+
   const leadTimeRibbon = [
     { horizon: "T+1", title: "Departure Eve", val: ribbonMap["T+1"]?.val || "—", change: ribbonMap["T+1"]?.change || "—", status: "Severe Yield Surge", badgeVariant: "danger" as const },
     { horizon: "T+7", title: "1 Week Out", val: ribbonMap["T+7"]?.val || "—", change: ribbonMap["T+7"]?.change || "—", status: "Elevated Yields", badgeVariant: "warning" as const },
@@ -180,8 +192,8 @@ export default function NationalOverviewPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title="Headline Index (T+15)"
-          value={headline?.index_value?.toFixed(2) ?? "—"}
-          subtitle={`Base 2026-08-01 = 100 | ${headline?.period_start ?? "—"}`}
+          value={`${headline?.index_value?.toFixed(2) ?? "—"}${headlineSe != null ? ` ±${headlineSe.toFixed(2)}` : ""}`}
+          subtitle={`${headlineCiLabel} | ${headline?.period_start ?? "—"}`}
           icon={<TrendingUp className="h-6 w-6" />}
           trend={{ value: `${headline?.daily_change_pct ?? 0 >= 0 ? "+" : ""}${headline?.daily_change_pct?.toFixed(2) ?? "0.00"}%`, direction: (headline?.daily_change_pct ?? 0) >= 0 ? "up" : "down", label: "24h" }}
           badge="LIVE"
@@ -279,7 +291,7 @@ export default function NationalOverviewPage() {
               <Calendar className="h-5 w-5 text-orange-400" />
               56-Day Timeline: Past 28 Days + Future 28 Days
             </h3>
-            <p className="text-sm text-muted-foreground mt-1">Ensemble forecast: TimesFM 2.5 (50%) + LightGBM (35%) + Statistical (15%) · P10-P90 bands</p>
+            <p className="text-sm text-muted-foreground mt-1">Ensemble forecast: TimesFM 2.5 (50%) + LightGBM (35%) + Statistical (15%) · P10-P90 bands · Historical 95% bootstrap CI (NSO-standard)</p>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" size="sm">TimesFM 50%</Badge>
@@ -296,6 +308,7 @@ export default function NationalOverviewPage() {
           color="orange"
           showForecastBands={true}
           showConfidence={true}
+          showHistoricalErrorBand={true}
           valuePrefix="Index: "
         />
       </div>

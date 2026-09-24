@@ -2,7 +2,6 @@
 
 Complies with PRD Section 11, 12, 13 (Ethical collection, rate limiting, and raw payload audit).
 """
-
 import datetime
 import hashlib
 import json
@@ -13,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from packages.shared.time_utils import utcnow
 from services.collectors.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 class BaseOTAScraper(ABC):
     """Base class for all OTA and metasearch flight price collectors."""
+
+    # Standard feed-type tag applied to every OTA / metasearch quote. Aligns with
+    # FEED_QUALITY_WEIGHTS (packages/statistics/estimators.py) so OTA-aggregator
+    # samples are downweighted relative to authoritative carrier-direct feeds.
+    FEED_TYPE = "OTA_AGGREGATOR"
 
     def __init__(
         self,
@@ -69,6 +74,7 @@ class BaseOTAScraper(ABC):
             if quotes:
                 for q in quotes:
                     q["extraction_method"] = q.get("extraction_method", "NETWORK_XHR")
+                    q["feed_type"] = self.FEED_TYPE
                 self.circuit_breaker._record_success(db)
                 self._persist_raw_payload(quotes, origin_airport, destination_airport, travel_date)
                 return quotes
@@ -106,6 +112,7 @@ class BaseOTAScraper(ABC):
         )
         for q in quotes:
             q["extraction_method"] = q.get("extraction_method", "CALIBRATED_MODEL")
+            q["feed_type"] = self.FEED_TYPE
         return quotes
 
     @abstractmethod
@@ -138,7 +145,7 @@ class BaseOTAScraper(ABC):
         travel_date: datetime.date,
     ) -> str:
         """Stores raw payload with SHA-256 hash for audit compliance."""
-        ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        ts = utcnow().strftime("%Y%m%d_%H%M%S")
         filename = f"{origin}_{dest}_{travel_date.isoformat()}_{ts}.json"
         filepath = os.path.join(self.raw_dir, filename)
 

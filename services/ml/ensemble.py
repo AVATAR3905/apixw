@@ -15,6 +15,7 @@ from statsmodels.tsa.seasonal import STL
 
 from database.session import SessionLocal
 from packages.schemas.models import IndexValue
+from packages.shared.time_utils import utcnow
 from packages.statistics.weights import DGCAWeightEngine
 from services.ml.training_pipeline import FeatureEngineer, LightGBMTrainer, get_external_features
 
@@ -388,7 +389,7 @@ class EnsembleForecaster:
                 "lightgbm": "lgbm-v3-conformal",
                 "statistical": "stl-arima-v1",
             },
-            generated_at=datetime.utcnow(),
+            generated_at=utcnow(),
         )
 
     def forecast_all_series(
@@ -431,7 +432,13 @@ def get_historical_index_data(
     ).order_by(IndexValue.period_start.desc()).limit(days).all()
 
     return [
-        {"date": r.period_start.isoformat(), "value": float(r.index_value)}
+        {
+            "date": r.period_start.isoformat(),
+            "value": float(r.index_value),
+            "standard_error": r.standard_error,
+            "ci_lower": r.index_ci_lower,
+            "ci_upper": r.index_ci_upper,
+        }
         for r in reversed(records)
     ]
 

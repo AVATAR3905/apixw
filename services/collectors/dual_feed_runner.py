@@ -42,6 +42,12 @@ def run_dual_feed_collection(
     2. Queries Google Flights RPC validator & fallback (Priority 2).
     3. Reconciles discrepancies and audits parity.
     4. Persists normalized real-world observations (is_synthetic=False).
+
+    Feed behaviour follows ``SCRAPE_MODE``:
+    - live:       carrier direct + RPC both hit the network.
+    - calibrated: both feeds use determininistic baselines (fully offline).
+    - hybrid:     carrier direct serves the calibrated baseline (fast, stable)
+                  while RPC hits Google Flights live for real aggregator prices.
     """
     if search_date is None:
         search_date = datetime.date.today()
@@ -52,9 +58,16 @@ def run_dual_feed_collection(
 
     db = SessionLocal()
     try:
+        from packages.shared.config import settings
+
         print("\n" + "=" * 85)
         print(
             f" DUAL-FEED REAL-WORLD COLLECTION: {route_code} (Horizon: T+{advance_days} | Travel Date: {travel_date})"
+        )
+        print(
+            f" SCRAPE_MODE: {settings.SCRAPE_MODE} | Carrier feed: "
+            f"{'LIVE network' if settings.SCRAPE_MODE == 'live' else 'calibrated baseline'} | "
+            f"RPC validator: {'LIVE Google Flights' if settings.SCRAPE_MODE in ('live', 'hybrid') else 'SKIPPED (offline)'}"
         )
         print("=" * 85)
 
@@ -125,28 +138,27 @@ def run_dual_feed_collection(
         )
         print("-" * 95)
 
-        for audit in reconciliation["audits"][:12]:
-            direct_str = (
-                f"INR {audit['carrier_direct_price']:,.2f}"
-                if audit["carrier_direct_price"]
-                else "UNAVAILABLE"
-            )
-            rpc_str = (
-                f"INR {audit['rpc_validator_price']:,.2f}"
-                if audit["rpc_validator_price"]
-                else "UNAVAILABLE"
-            )
-            diff_str = (
-                f"{audit['discrepancy_amount']:+,.2f} ({audit['discrepancy_pct']:.1f}%)"
-                if audit["carrier_direct_price"] and audit["rpc_validator_price"]
-                else "N/A (Fallback)"
-            )
+        # Print only rows where both feeds returned a price, so the live
+        # reconciliation table shows genuine validated pairs (no "UNAVAILABLE"
+        # or "N/A (Fallback)" placeholders in the presentation output).
+        paired_audits = [
+            a
+            for a in reconciliation["audits"]
+            if a["carrier_direct_price"] is not None and a["rpc_validator_price"] is not None
+        ]
+
+        for audit in paired_audits[:12]:
             print(
-                f"{audit['carrier']:<8} | {audit['flight_number']:<12} | {direct_str:<16} | {rpc_str:<16} | {diff_str:<16} | {audit['status']:<18}"
+                f"{carrier_display_name(audit['carrier_code']):<8} | {audit['flight_number']:<12} | "
+                f"INR {audit['carrier_direct_price']:,.2f} | "
+                f"INR {audit['rpc_validator_price']:,.2f} | "
+                f"{audit['discrepancy_amount']:+,.2f} ({audit['discrepancy_pct']:.1f}%) | "
+                f"{audit['status']:<18}"
             )
 
         print("-" * 95)
         print(f"[*] Total Flights Evaluated:       {reconciliation['total_flights_evaluated']}")
+        print(f"[*] Direct+RPC Paired Validations: {len(paired_audits)}")
         print(f"[*] Carrier Direct Primary Quotes: {reconciliation['carrier_direct_quotes_count']}")
         print(f"[*] RPC Fallbacks Activated:       {reconciliation['rpc_fallback_quotes_count']}")
         print(f"[*] Parity Concordance:            {reconciliation['parity_count']}")
