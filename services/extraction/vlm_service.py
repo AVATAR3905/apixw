@@ -109,7 +109,25 @@ class VLMService:
     def __init__(self, prefer: str = ""):
         import os
 
-        self.prefer = prefer or os.environ.get("EXTRACTION_VLM_BACKEND", "paddleocr_vl")
+        explicit = prefer or os.environ.get("EXTRACTION_VLM_BACKEND")
+        has_openrouter_key = bool(os.environ.get("OPENROUTER_API_KEY"))
+        if not has_openrouter_key:
+            try:
+                from packages.shared.config import settings
+
+                has_openrouter_key = bool(getattr(settings, "OPENROUTER_API_KEY", ""))
+            except ImportError:
+                pass
+        if explicit:
+            self.prefer = explicit
+        elif has_openrouter_key:
+            # No explicit preference set, but a key is configured: prefer the
+            # cloud backend, which measured ~100x faster than the local 0.9B
+            # model (~1-3s vs ~110s/image) at negligible per-image cost. The
+            # local backend remains available and is tried next if this fails.
+            self.prefer = "openrouter"
+        else:
+            self.prefer = "paddleocr_vl"
         self.backends: Dict[str, Callable[..., Any]] = {
             "paddleocr_vl": self._paddleocr_vl,
             "openrouter": self._openrouter,

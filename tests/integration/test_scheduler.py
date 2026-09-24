@@ -12,8 +12,22 @@ def test_collection_scheduler_full_cycle():
     """
     Verifies that trigger_collection_cycle executes jobs for:
     10 routes x 5 horizons = 50 collection jobs.
+
+    ``trigger_collection_cycle`` now has resume support: it skips any
+    route/horizon that already has a COMPLETED job for the same
+    date+source, so a fresh run "fast-forwards" past already-done work
+    instead of re-collecting it. That means this test's fixed
+    ``cycle_date`` must start from a genuinely clean slate on every run --
+    it previously only cleaned up *after* itself, so a run interrupted
+    before reaching ``finally`` (e.g. killed by a test-runner timeout) left
+    COMPLETED rows behind that a later run would then correctly skip,
+    producing a spurious ``jobs_total == 0`` failure unrelated to any real
+    regression.
     """
     db = SessionLocal()
+    cycle_date = datetime.date(2026, 9, 2)
+    db.query(CollectionJob).filter(CollectionJob.search_date == cycle_date).delete()
+    db.commit()
     try:
         # Use existing source #1 (Synthetic Pipeline Verification Feed) or create an approved test source
         source = (
@@ -24,7 +38,6 @@ def test_collection_scheduler_full_cycle():
         connector = LiveFlightConnector(source_id=source.id, source_name=source.name)
         scheduler = CollectionScheduler(connector=connector)
 
-        cycle_date = datetime.date(2026, 9, 2)
         summary = scheduler.trigger_collection_cycle(
             db, search_date=cycle_date, connector=connector
         )

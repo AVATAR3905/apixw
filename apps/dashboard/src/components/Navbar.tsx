@@ -24,6 +24,7 @@ import {
   Database,
   Globe,
   Clock,
+  Gavel,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -101,6 +102,7 @@ const navigation: NavItem[] = [
       { label: "Data Quality", href: "/quality", icon: Shield },
       { label: "Source Registry", href: "/sources", icon: Globe },
       { label: "Methodology", href: "/methodology", icon: FlaskConical },
+      { label: "Policy Insights", href: "/policy-insights", icon: Gavel },
     ],
   },
   {

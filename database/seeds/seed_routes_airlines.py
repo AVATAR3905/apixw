@@ -325,6 +325,46 @@ def seed_sources(db: Session):
             "enabled": True,
             "health_status": "HEALTHY",
         },
+        # Licensed GDS / partner-API tier (source id 13) -- NOT scraped. These
+        # feeds carry PARTNER_ONLY access policy and require a PARTNER_AGREEMENT
+        # license, matching SourceRegistryService.can_collect. Air India and
+        # IndiGo are both Amadeus-distributed, so this one key covers the two
+        # carriers whose portals reject programmatic access at the transport
+        # level. Credentials are optional to *run*: without a key the adapter
+        # degrades to the tagged calibrated fallback.
+        {
+            "id": 13,
+            "name": "Amadeus Self-Service API",
+            "type": "GDS_API",
+            "access_method": "REST_API",
+            "access_mode": "PARTNER_ONLY",
+            "permission_status": "APPROVED",
+            "tos_status": "PARTNER_API_AGREEMENT",
+            "robots_status": "NOT_APPLICABLE",
+            "license_status": "PARTNER_AGREEMENT",
+            "rate_limit": 30,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
+        # Sabre Developer Hub (source id 14) -- same licensed GDS tier. Free,
+        # self-service registration (create app -> User ID/Password -> OAuth
+        # token), Flight Shop API on the PLAY cert environment. This became the
+        # main self-service licensed route after Amadeus decommissioned its free
+        # portal on 2026-07-17.
+        {
+            "id": 14,
+            "name": "Sabre Developer Hub",
+            "type": "GDS_API",
+            "access_method": "REST_API",
+            "access_mode": "PARTNER_ONLY",
+            "permission_status": "APPROVED",
+            "tos_status": "PARTNER_API_AGREEMENT",
+            "robots_status": "NOT_APPLICABLE",
+            "license_status": "PARTNER_AGREEMENT",
+            "rate_limit": 30,
+            "enabled": True,
+            "health_status": "HEALTHY",
+        },
     ]
 
     for s in sources:

@@ -224,7 +224,7 @@ audience sees the genuine neural extraction (tokens → fare cards → VLM field
 - **Screen:** Lead-Time WOW (`http://localhost:3000/lead-time`)
 
 ### 3:30 – 4:30 | MoSPI Benchmark Directional Co-Movement
-- **Narrative:** "Rather than claiming artificial identical levels with official retrospective surveys, we reframe benchmark comparison honestly as **Directional Co-Movement Analysis**. On frequency-matched monthly series, our prototype achieves **100% Directional Sign Concordance** and a Pearson correlation of **r = 0.997** ($p < 0.001$). We include our prominent methodological disclosure explaining the structural differences between forward search quotes and retrospective survey points."
+- **Narrative:** "Rather than claiming artificial identical levels with official retrospective surveys, we reframe benchmark comparison honestly as **Directional Co-Movement Analysis** against MoSPI's real published CPI (item 07.3 Passenger transport services, 2024=100, transcribed from official Press Release PDFs). Right now the API honestly reports `INSUFFICIENT_REAL_OVERLAP`: MoSPI publishes with a 5-6 week lag, so its latest month (July 2026) doesn't yet overlap our own operating history, which only started in August. We show the illustrative reference scorecard shape -- clearly flagged as non-live -- rather than fabricate a correlation number, and the comparison will compute for real the moment both series share 3+ overlapping months."
 - **Screen:** Benchmark Validation (`http://localhost:3000/validation`)
 
 ### 4:30 – 5:15 | ATF (Jet Fuel) Macro Context & Quality Gate

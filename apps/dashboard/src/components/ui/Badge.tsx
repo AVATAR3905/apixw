@@ -27,7 +27,7 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   dot?: boolean;
 }
 
-export function Badge({ className, variant = "default", size = "md", dot, ...props }: BadgeProps) {
+export function Badge({ className, variant = "default", size = "md", dot, children, ...props }: BadgeProps) {
   const sizeClasses = {
     xs: "px-1.5 py-0.5 text-[9px]",
     sm: "px-2 py-0.5 text-[10px]",
@@ -56,6 +56,7 @@ export function Badge({ className, variant = "default", size = "md", dot, ...pro
           )}
         />
       )}
+      {children}
     </span>
   );
 }

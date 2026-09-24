@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>APIx — Real-time Airfare Price Intelligence</title>
+  <meta name="description" content="APIx airfare price index and route intelligence dashboard for Indian domestic routes." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Special+Elite&display=swap" rel="stylesheet">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Geist','sans-serif'], display: ['Special Elite','serif'] },
+          colors: {
+            ink: '#11110f',
+            paper: '#f6f5f1',
+            muted: '#74736d',
+            amberx: '#b76e3d',
+            line: 'rgba(17,17,15,.10)'
+          },
+          boxShadow: {
+            glass: '0 24px 80px rgba(24,22,18,.14), inset 0 1px 0 rgba(255,255,255,.75)',
+            soft: '0 12px 45px rgba(24,22,18,.09)'
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root { color-scheme: light; }
+    html { scroll-behavior:smooth; }
+    body {
+      margin:0; background:#f6f5f1; color:#11110f; font-family:'Geist',sans-serif;
+      overflow-x:hidden;
+    }
+    * { box-sizing:border-box; }
+    button, input, select { font:inherit; }
+    .grain::after {
+      content:""; position:fixed; inset:0; pointer-events:none; opacity:.045; z-index:50;
+      background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+    }
+    .glass {
+      background:rgba(255,255,255,.56);
+      border:1px solid rgba(255,255,255,.82);
+      backdrop-filter:blur(22px);
+      -webkit-backdrop-filter:blur(22px);
+      box-shadow:0 24px 80px rgba(24,22,18,.10), inset 0 1px 0 rgba(255,255,255,.82);
+    }
+    .glass-dark {
+      background:rgba(20,20,18,.90);
+      border:1px solid rgba(255,255,255,.12);
+      backdrop-filter:blur(22px);
+      -webkit-backdrop-filter:blur(22px);
+    }
+    .orb { filter:blur(1px); animation:float 9s ease-in-out infinite; }
+    .orb2 { animation-delay:-3s; }
+    @keyframes float { 50% { transform:translate3d(0,-18px,0) scale(1.03); } }
+    .fade-up { animation:fadeUp .7s cubic-bezier(.2,.8,.2,1) both; }
+    @keyframes fadeUp { from {opacity:0; transform:translateY(12px)} to {opacity:1; transform:none} }
+    .nav-active { background:#11110f!important; color:white!important; box-shadow:0 8px 25px rgba(17,17,15,.18); }
+    .chart-box { height:330px; }
+    .heat { transition:transform .18s ease, box-shadow .18s ease; }
+    .heat:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(0,0,0,.10); }
+    ::selection { background:#11110f; color:white; }
+    @media (max-width: 760px) {
+      .chart-box { height:250px; }
+    }
+  </style>
+</head>
+
+<body class="grain">
+  <div class="fixed inset-0 -z-10 overflow-hidden">
+    <div class="orb absolute -top-40 -left-24 h-[520px] w-[520px] rounded-full bg-[#e8c4a8]/55"></div>
+    <div class="orb orb2 absolute top-32 right-[-180px] h-[580px] w-[580px] rounded-full bg-[#c9d8d0]/60"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,.92),transparent_50%)]"></div>
+  </div>
+
+  <header class="sticky top-0 z-40 border-b border-black/5 bg-[#f6f5f1]/75 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-4 md:px-8">
+      <div class="flex items-center gap-3">
+        <div class="grid h-10 w-10 place-items-center rounded-2xl bg-[#11110f] text-white shadow-soft">
+          <i data-lucide="plane" class="h-5 w-5 -rotate-12"></i>
+        </div>
+        <div>
+          <div class="font-display text-[28px] leading-none">APIx</div>
+          <div class="mt-0.5 text-[10px] font-semibold uppercase tracking-[.22em] text-muted">Airfare intelligence</div>
+        </div>
+      </div>
+
+      <nav id="nav" class="hidden items-center gap-1 rounded-full border border-black/5 bg-white/45 p-1 md:flex">
+        <button data-view="overview" class="nav-btn nav-active rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] transition-all hover:-translate-y-px">Overview</button>
+        <button data-view="routes" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Routes</button>
+        <button data-view="route-index" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Route index</button>
+        <button data-view="heatmap" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Heatmap</button>
+        <button data-view="elasticity" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Elasticity</button>
+        <button data-view="fares" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Fares</button>
+        <button data-view="backtest" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Backtest</button>
+      </nav>
+
+      <div class="flex items-center gap-2">
+        <span id="dataBadge" class="hidden items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-2 text-xs font-semibold md:flex"></span>
+        <button id="modeLive" class="hidden rounded-full border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold transition hover:bg-white md:flex">Live</button>
+        <button id="modeDemo" class="hidden rounded-full border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold transition hover:bg-white md:flex">Demo</button>
+        <div id="healthPill" class="hidden items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-2 text-xs font-medium md:flex">
+          <span class="h-2 w-2 rounded-full bg-amberx"></span>
+          <span>Connecting</span>
+        </div>
+        <button id="mobileMenu" class="grid h-10 w-10 place-items-center rounded-full border border-black/10 bg-white/60 md:hidden">
+          <i data-lucide="menu" class="h-5 w-5"></i>
+        </button>
+      </div>
+    </div>
+    <div id="mobileNav" class="hidden border-t border-black/5 px-4 pb-4 md:hidden">
+      <div class="grid grid-cols-2 gap-2 pt-3">
+        <button data-view="overview" class="mobile-nav-btn rounded-2xl bg-[#11110f] px-3 py-3 text-sm font-semibold text-white">Overview</button>
+        <button data-view="routes" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Routes</button>
+        <button data-view="route-index" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Route index</button>
+        <button data-view="heatmap" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Heatmap</button>
+        <button data-view="elasticity" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Elasticity</button>
+        <button data-view="fares" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Fares</button>
+        <button data-view="backtest" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Backtest</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-[1440px] px-5 pb-16 pt-8 md:px-8 md:pt-12">
+    <section class="fade-up mb-7">
+      <div class="glass relative overflow-hidden rounded-[34px] p-6 md:p-9">
+        <div class="absolute right-[-70px] top-[-120px] h-[360px] w-[360px] rounded-full bg-[#b76e3d]/10 blur-3xl"></div>
+        <div class="relative grid items-end gap-8 lg:grid-cols-[1fr_auto]">
+          <div>
+            <div class="mb-4 inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/55 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted">
+              <span class="h-1.5 w-1.5 rounded-full bg-[#b76e3d]"></span>
+              Real-time Indian domestic airfare index
+            </div>
+            <h1 class="max-w-4xl text-[clamp(42px,6vw,78px)] font-medium leading-[.94] tracking-[-.055em]">
+              Know when a fare is<br><span class="text-[#8f5b3d]">actually expensive.</span>
+            </h1>
+            <p class="mt-5 max-w-2xl text-base leading-7 text-muted md:text-lg">
+              APIx turns cleaned flight quotes into a route-aware price index, fare intelligence and historical benchmarks, so teams can understand airfare movement instead of staring at raw numbers.
+            </p>
+          </div>
+
+          <div class="glass-dark min-w-[260px] rounded-[26px] p-5 text-white shadow-soft">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-semibold uppercase tracking-[.16em] text-white/50">System status</span>
+              <i data-lucide="activity" class="h-4 w-4 text-[#d9a17e]"></i>
+            </div>
+            <div class="mt-5 flex items-end justify-between">
+              <div>
+                <div id="heroIndex" class="text-4xl font-semibold tracking-[-.04em]">—</div>
+                <div class="mt-1 text-xs text-white/45">latest national index</div>
+              </div>
+              <div id="heroDate" class="text-right text-xs text-white/45">Waiting for API</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="errorBar" class="mb-6 hidden rounded-2xl border border-[#b76e3d]/20 bg-[#b76e3d]/10 px-4 py-3 text-sm text-[#7c492c]"></div>
+
+    <!-- OVERVIEW -->
+    <section id="view-overview" class="view fade-up">
+      <div class="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="glass rounded-[26px] p-5">
+          <div class="flex items-center justify-between"><span class="text-xs font-semibold uppercase tracking-[.12em] text-muted">Current index</span><i data-lucide="gauge" class="h-4 w-4 text-muted"></i></div>
+          <div id="statIndex" class="mt-5 text-4xl font-semibold tracking-[-.05em]">—</div>
+          <div class="mt-2 text-xs text-muted">National · median aggregation</div>
+        </div>
+        <div class="glass rounded-[26px] p-5">
+          <div class="flex items-center justify-between"><span class="text-xs font-semibold uppercase tracking-[.12em] text-muted">Routes tracked</span><i data-lucide="route" class="h-4 w-4 text-muted"></i></div>
+          <div id="statRoutes" class="mt-5 text-4xl font-semibold tracking-[-.05em]">—</div>
+          <div class="mt-2 text-xs text-muted">Active reference routes</div>
+        </div>
+        <div class="glass rounded-[26px] p-5">
+          <div class="flex items-center justify-between"><span class="text-xs font-semibold uppercase tracking-[.12em] text-muted">Index window</span><i data-lucide="calendar-range" class="h-4 w-4 text-muted"></i></div>
+          <div id="statWindow" class="mt-5 text-4xl font-semibold tracking-[-.05em]">90d</div>
+          <div class="mt-2 text-xs text-muted">Typical pipeline observation window</div>
+        </div>
+        <div class="glass rounded-[26px] p-5">
+          <div class="flex items-center justify-between"><span class="text-xs font-semibold uppercase tracking-[.12em] text-muted">API health</span><i data-lucide="shield-check" class="h-4 w-4 text-muted"></i></div>
+          <div id="statHealth" class="mt-5 text-4xl font-semibold tracking-[-.05em]">—</div>
+          <div class="mt-2 text-xs text-muted">Database reachability included</div>
+        </div>
+      </div>
+
+      <div class="grid gap-5 lg:grid-cols-[1fr_360px]">
+        <div class="glass rounded-[30px] p-5 md:p-7">
+          <div class="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">National price signal</div>
+              <div id="overviewHeadline" class="mt-1 text-xl font-semibold">Loading index series…</div>
+            </div>
+            <div class="flex gap-2">
+              <select id="ovFrequency" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold outline-none">
+                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option>
+              </select>
+              <select id="ovMethod" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold outline-none">
+                <option value="median" selected>Median</option><option value="min">Min</option>
+              </select>
+            </div>
+          </div>
+          <div class="chart-box mt-5"><canvas id="overviewChart"></canvas></div>
+        </div>
+
+        <div class="glass rounded-[30px] p-6">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">What APIx does</div>
+              <div class="mt-1 text-lg font-semibold">From quote → signal</div>
+            </div>
+            <i data-lucide="workflow" class="h-5 w-5 text-muted"></i>
+          </div>
+          <div class="mt-6 space-y-3">
+            <div class="rounded-2xl bg-white/60 p-4"><div class="flex gap-3"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#11110f] text-xs text-white">01</span><div><b class="text-sm">Ingest</b><p class="mt-1 text-xs leading-5 text-muted">Raw flight quotes enter an append-only store.</p></div></div></div>
+            <div class="rounded-2xl bg-white/60 p-4"><div class="flex gap-3"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#11110f] text-xs text-white">02</span><div><b class="text-sm">Clean</b><p class="mt-1 text-xs leading-5 text-muted">Deduplicate, remove sold-out/outliers and impute gaps.</p></div></div></div>
+            <div class="rounded-2xl bg-white/60 p-4"><div class="flex gap-3"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#11110f] text-xs text-white">03</span><div><b class="text-sm">Index</b><p class="mt-1 text-xs leading-5 text-muted">Route-day aggregates become national and route indices.</p></div></div></div>
+            <div class="rounded-2xl bg-[#11110f] p-4 text-white"><div class="flex gap-3"><span class="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/10 text-xs">04</span><div><b class="text-sm">Validate</b><p class="mt-1 text-xs leading-5 text-white/50">Backtest APIx against a benchmark before trusting the signal.</p></div></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ROUTES -->
+    <section id="view-routes" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Reference network</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Routes</h2><p class="mt-2 text-muted">The active domestic route universe used by the index.</p></div>
+      <div class="glass overflow-hidden rounded-[30px]">
+        <div class="overflow-x-auto"><table id="routesTable" class="w-full min-w-[800px] text-left text-sm"></table></div>
+      </div>
+    </section>
+
+    <!-- ROUTE INDEX -->
+    <section id="view-route-index" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Route intelligence</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Route index</h2><p class="mt-2 text-muted">Compare the price signal for one city pair across time and booking horizons.</p></div>
+      <div class="glass rounded-[30px] p-5 md:p-7">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <select id="riRoute" class="control"></select>
+          <select id="riFrequency" class="control"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+          <select id="riApd" class="control"><option value="">All booking horizons</option><option value="1">1 day out</option><option value="7">7 days out</option><option value="15">15 days out</option><option value="30">30 days out</option><option value="45">45 days out</option></select>
+          <select id="riMethod" class="control"><option value="median">Median</option><option value="min">Minimum</option></select>
+        </div>
+        <div class="chart-box mt-7"><canvas id="routeChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- HEATMAP -->
+    <section id="view-heatmap" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Booking horizon</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Fare heatmap</h2><p class="mt-2 text-muted">See how observed fares change by date and days-before-departure.</p></div>
+      <div class="glass rounded-[30px] p-5 md:p-7">
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <select id="hmRoute" class="control"></select>
+          <input id="hmFrom" type="date" class="control">
+          <input id="hmTo" type="date" class="control">
+          <button id="hmRender" class="rounded-full bg-[#11110f] px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#292925]">Render heatmap</button>
+        </div>
+        <div id="hmLegend" class="mt-5 text-xs text-muted"></div>
+        <div id="heatmap" class="mt-4 overflow-x-auto"></div>
+      </div>
+    </section>
+
+    <!-- ELASTICITY -->
+    <section id="view-elasticity" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Purchase timing</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Fare elasticity</h2><p class="mt-2 text-muted">Explore the relationship between airfare and advance-purchase days.</p></div>
+      <div class="glass rounded-[30px] p-5 md:p-7">
+        <select id="elRoute" class="control max-w-xs"></select>
+        <div id="elNote" class="mt-4 text-sm text-muted"></div>
+        <div class="chart-box mt-5"><canvas id="elasticChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- FARES -->
+    <section id="view-fares" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Cleaned observations</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Fare explorer</h2><p class="mt-2 text-muted">Search the cleaned fare layer behind the index.</p></div>
+      <div class="glass rounded-[30px] p-5 md:p-7">
+        <form id="fareForm" class="grid gap-3 md:grid-cols-6">
+          <select id="faRoute" class="control"></select>
+          <input id="faCarrier" class="control" placeholder="Carrier e.g. 6E">
+          <div><label class="block text-[10px] font-semibold uppercase tracking-[.12em] text-muted">Observed from</label><input id="faFrom" type="date" class="control w-full"></div>
+          <div><label class="block text-[10px] font-semibold uppercase tracking-[.12em] text-muted">Observed to</label><input id="faTo" type="date" class="control w-full"></div>
+          <div><label class="block text-[10px] font-semibold uppercase tracking-[.12em] text-muted">Travel from</label><input id="faTravFrom" type="date" class="control w-full"></div>
+          <div><label class="block text-[10px] font-semibold uppercase tracking-[.12em] text-muted">Travel to</label><input id="faTravTo" type="date" class="control w-full"></div>
+          <button class="rounded-full bg-[#11110f] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#292925] md:col-span-6 lg:col-span-6">Search fares</button>
+        </form>
+        <div id="fareSummary" class="mt-5 text-xs font-semibold uppercase tracking-[.12em] text-muted"></div>
+        <div class="mt-4 overflow-x-auto"><table id="fareTable" class="w-full min-w-[1200px] text-left text-sm"></table></div>
+        <div class="mt-5 flex justify-end gap-2"><button id="faPrev" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold disabled:opacity-30">Previous</button><button id="faNext" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold disabled:opacity-30">Next</button></div>
+      </div>
+    </section>
+
+    <!-- BACKTEST -->
+    <section id="view-backtest" class="view hidden">
+      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Model validation</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Backtest</h2><p class="mt-2 text-muted">APIx versus the benchmark across comparable historical months.</p></div>
+      <div class="grid gap-5 lg:grid-cols-[340px_1fr]">
+        <div class="glass rounded-[30px] p-6">
+          <div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Validation summary</div>
+          <div id="btStats" class="mt-6 space-y-4"></div>
+        </div>
+        <div class="glass rounded-[30px] p-5 md:p-7"><div class="chart-box"><canvas id="backtestChart"></canvas></div></div>
+      </div>
+      <div class="glass mt-5 overflow-hidden rounded-[30px]"><div class="overflow-x-auto"><table id="btTable" class="w-full min-w-[600px] text-left text-sm"></table></div></div>
+    </section>
+
+    <footer class="mt-14 flex flex-col justify-between gap-4 border-t border-black/10 pt-6 text-xs text-muted md:flex-row">
+      <div>APIx · Real-time Airfare Price Index Backend</div>
+      <div class="flex gap-5"><span>FastAPI</span><span>PostgreSQL (SQLite dev fallback)</span><span>Median + Min index</span><span>Indian domestic routes</span></div>
+    </footer>
+  </main>
+
+<script>
+  const $ = s => document.querySelector(s);
+  const $$ = s => [...document.querySelectorAll(s)];
+  const API_BASE = localStorage.getItem('apix_api_base') || ''; // e.g. http://localhost:8000
+  const charts = {};
+  let routes = [];
+  let farePage = 1;
+
+  function setMode(base){
+    localStorage.setItem('apix_api_base', base);
+    location.reload();
+  }
+
+  const mock = {
+    routes: [
+      {origin_iata:'DEL',destination_iata:'BOM',distance_km:1148,dgca_traffic_weight:.18,is_proxy_weight:false,is_active:true},
+      {origin_iata:'DEL',destination_iata:'BLR',distance_km:1740,dgca_traffic_weight:.16,is_proxy_weight:false,is_active:true},
+      {origin_iata:'BOM',destination_iata:'BLR',distance_km:838,dgca_traffic_weight:.14,is_proxy_weight:false,is_active:true},
+      {origin_iata:'DEL',destination_iata:'HYD',distance_km:1269,dgca_traffic_weight:.10,is_proxy_weight:true,is_active:true},
+      {origin_iata:'BOM',destination_iata:'DEL',distance_km:1148,dgca_traffic_weight:.18,is_proxy_weight:false,is_active:true}
+    ]
+  };
+
+  function showError(msg) {
+    const el = $('#errorBar');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+  function clearError(){ $('#errorBar').classList.add('hidden'); }
+  async function api(path, options={}) {
+    const url = API_BASE + path;
+    const r = await fetch(url, options);
+    let body = null;
+    try { body = await r.json(); } catch {}
+    if(!r.ok) throw new Error((body && body.detail) ? JSON.stringify(body.detail) : r.statusText);
+    return body;
+  }
+  function params(o){
+    const p = new URLSearchParams();
+    Object.entries(o).forEach(([k,v]) => { if(v !== undefined && v !== null && v !== '') p.set(k,v); });
+    return p.toString();
+  }
+  function money(v){ return v == null ? '—' : '₹' + Number(v).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+  function table(el, headers, rows){
+    el.innerHTML = '<thead><tr>' + headers.map(h=>`<th class="border-b border-black/10 bg-white/35 px-4 py-4 text-[10px] font-semibold uppercase tracking-[.12em] text-muted">${h}</th>`).join('') + '</tr></thead><tbody>' +
+      rows.map(r=>'<tr>'+r.map(v=>`<td class="border-b border-black/5 px-4 py-4 text-sm">${v ?? ''}</td>`).join('')+'</tr>').join('')+'</tbody>';
+  }
+  function chart(id, labels, datasets, opts={}){
+    if(charts[id]) charts[id].destroy();
+    const ctx = $('#'+id);
+    charts[id] = new Chart(ctx,{type:'line',data:{labels,datasets},options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{legend:{display:datasets.length>1,position:'bottom',labels:{usePointStyle:true,boxWidth:8,font:{family:'Geist',size:11}}}},
+      scales:{
+        x:{grid:{display:false},ticks:{color:'#8b8982',font:{size:10},maxTicksLimit:8}},
+        y:{grid:{color:'rgba(17,17,15,.07)'},ticks:{color:'#8b8982',font:{size:10}}}
+      }, ...opts
+    }});
+  }
+  const ds = (label,data,extra={}) => ({label,data,borderColor:'#171714',backgroundColor:'rgba(183,110,61,.10)',pointBackgroundColor:'#171714',pointRadius:2,tension:.35,borderWidth:2,fill:true,...extra});
+
+  function populateRoutes(){
+    const codes = routes.map(r=>r.origin_iata+'-'+r.destination_iata);
+    ['riRoute','hmRoute','elRoute'].forEach(id=>{
+      const s=$('#'+id); s.innerHTML=codes.map(c=>`<option value="${c}">${c}</option>`).join('');
+    });
+    $('#faRoute').innerHTML='<option value="">All routes</option>'+codes.map(c=>`<option value="${c}">${c}</option>`).join('');
+  }
+
+  async function loadRoutes(){
+    try { routes = await api('/routes'); clearError(); }
+    catch(e) { routes = mock.routes; showError('API not connected. Showing a polished demo state. Set localStorage.apix_api_base to your FastAPI origin to connect live data.'); }
+    populateRoutes();
+    $('#statRoutes').textContent = routes.length;
+  }
+
+  async function overview(){
+    let data;
+    try { data=await api('/index/headline?'+params({frequency:$('#ovFrequency').value,aggregation_method:$('#ovMethod').value})); clearError(); }
+    catch(e){ data=fakeSeries(); }
+    const points=data.points||[];
+    if(!points.length) return;
+    const last=points[points.length-1];
+    $('#statIndex').textContent=Number(last.index_value).toFixed(1);
+    $('#heroIndex').textContent=Number(last.index_value).toFixed(1);
+    $('#heroDate').textContent=last.index_date||'';
+    $('#overviewHeadline').textContent=`Latest ${$('#ovFrequency').value} ${$('#ovMethod').value} index · ${last.index_date}`;
+    let corePoints=[];
+    try {
+      const core=await api('/index/headline?'+params({frequency:$('#ovFrequency').value,aggregation_method:$('#ovMethod').value,series_type:'CORE'}));
+      corePoints=(core.points||[]).map(p=>({date:p.index_date,value:Number(p.index_value)}));
+    } catch(e){}
+    const coreSet=new Map(corePoints.map(p=>[p.date,p.value]));
+    chart('overviewChart',points.map(p=>p.index_date),[
+      ds('Headline index',points.map(p=>Number(p.index_value)),{backgroundColor:'rgba(183,110,61,.14)'}),
+      ds('Core index',points.map(p=>coreSet.has(p.index_date)?coreSet.get(p.index_date):null),{borderColor:'#11110f',pointBackgroundColor:'#11110f',backgroundColor:'transparent',fill:false})
+    ]);
+    try {
+      const h=await api('/health');
+      $('#statHealth').textContent='Healthy';
+      $('#healthPill').innerHTML='<span class="h-2 w-2 rounded-full bg-emerald-500"></span><span>API healthy</span>';
+    } catch {
+      $('#statHealth').textContent='Demo';
+      $('#healthPill').innerHTML='<span class="h-2 w-2 rounded-full bg-amberx"></span><span>Demo mode</span>';
+    }
+  }
+  function fakeSeries(){
+    const n=24, arr=[]; let v=100;
+    for(let i=0;i<n;i++){v += (Math.random()-.43)*3; arr.push({index_date:`2026-${String(Math.floor(i/2)+1).padStart(2,'0')}-${i%2?'20':'05'}`,index_value:v});}
+    return {points:arr};
+  }
+  async function renderRoutes(){
+    let data; try{data=await api('/routes');}catch{data=routes;}
+    table($('#routesTable'),['Origin','Destination','Distance','DGCA weight','Proxy','Status'],
+      data.map(r=>[`<b>${r.origin_iata}</b>`,`<b>${r.destination_iata}</b>`,r.distance_km?`${Number(r.distance_km).toLocaleString()} km`:'—',r.dgca_traffic_weight??'—',r.is_proxy_weight?'Yes':'No',r.is_active?'<span class="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">Active</span>':'Inactive']));
+  }
+  async function routeIndex(){
+    let data; try{data=await api('/index?'+params({route:$('#riRoute').value,frequency:$('#riFrequency').value,advance_purchase_days:$('#riApd').value,aggregation_method:$('#riMethod').value}));}
+    catch{data={points:fakeSeries().points};}
+    const pts=data.points||[]; chart('routeChart',pts.map(p=>p.index_date),[ds($('#riRoute').value,pts.map(p=>Number(p.index_value)),{backgroundColor:'rgba(17,17,15,.07)'})]);
+  }
+  async function elasticity(){
+    let data; try{data=await api('/analytics/elasticity?'+params({route:$('#elRoute').value}));}
+    catch{data={route:$('#elRoute').value,points:[1,7,15,30,45].map((x,i)=>({advance_purchase_days:x,median_fare_inr:7200-i*740+(Math.random()*500)}))};}
+    $('#elNote').textContent=`Observed fare vs advance purchase days for ${data.route||$('#elRoute').value}`;
+    const pts=data.points||[];
+    chart('elasticChart',pts.map(p=>'APD '+p.advance_purchase_days),[ds('Median fare (INR)',pts.map(p=>Number(p.median_fare_inr??p.avg_fare_inr??p.min_fare_inr)),{backgroundColor:'rgba(183,110,61,.12)'})]);
+  }
+  async function heatmap(){
+    const route=$('#hmRoute').value, from=$('#hmFrom').value, to=$('#hmTo').value;
+    if(!from||!to)return;
+    let data;
+    try{data=await api('/analytics/heatmap?'+params({route,date_from:from,date_to:to}));}
+    catch{
+      const dates=[]; for(let i=0;i<12;i++){let d=new Date();d.setDate(d.getDate()-i);dates.push(d.toISOString().slice(0,10));}
+      data={route,cells:dates.flatMap(d=>[1,7,15,30,45].map(a=>({observation_date:d,advance_purchase_days:a,median_fare_inr:3500+(45-a)*55+Math.random()*1100})))};
+    }
+    const cells=data.cells||[], dates=[...new Set(cells.map(c=>c.observation_date))].sort(), apds=[...new Set(cells.map(c=>c.advance_purchase_days))].sort((a,b)=>a-b);
+    const vals=cells.map(c=>Number(c.median_fare_inr??c.avg_fare_inr??c.min_fare_inr)); const lo=Math.min(...vals),hi=Math.max(...vals),span=hi-lo||1;
+    const map=new Map(cells.map(c=>[c.observation_date+'|'+c.advance_purchase_days,c]));
+    let html='<table class="min-w-[780px] w-full"><thead><tr><th class="px-3 py-3 text-left text-[10px] uppercase tracking-[.12em] text-muted">Date</th>'+apds.map(a=>`<th class="px-3 py-3 text-center text-[10px] uppercase tracking-[.12em] text-muted">${a}d out</th>`).join('')+'</tr></thead><tbody>';
+    dates.forEach(d=>{html+='<tr><td class="border-t border-black/5 px-3 py-3 text-xs font-semibold">'+d+'</td>';apds.forEach(a=>{const c=map.get(d+'|'+a);if(!c){html+='<td class="border-t border-black/5"></td>';return;}const v=Number(c.median_fare_inr??c.avg_fare_inr??c.min_fare_inr),g=Math.round(248-(v-lo)/span*155);html+=`<td class="heat border-t border-black/5 px-3 py-3 text-center text-xs font-semibold" style="background:rgb(${g},${g},${g})">${money(v)}</td>`});html+='</tr>'});
+    $('#heatmap').innerHTML=html+'</tbody></table>';
+    $('#hmLegend').textContent=`${route} · darker cells indicate higher observed fares · range ${money(lo)} to ${money(hi)}`;
+  }
+  async function fares(){
+    let data; const q={route:$('#faRoute').value,carrier:$('#faCarrier').value,date_from:$('#faFrom').value,date_to:$('#faTo').value,travel_date_from:$('#faTravFrom').value,travel_date_to:$('#faTravTo').value,page:farePage,page_size:50};
+    try{data=await api('/fares/cleaned?'+params(q));}
+    catch{data={page:1,total:6,page_size:50,items:Array.from({length:6},(_,i)=>({id:i+1,observation_date:'2026-09-'+String(12-i).padStart(2,'0'),origin_iata:'DEL',destination_iata:'BOM',carrier_iata:i%2?'6E':'AI',flight_number:'0'+(100+i),fare_class:'Y',cabin_class:'economy',total_fare_inr:4200+i*480,has_full_breakdown:true,advance_purchase_days:[1,7,15,30][i%4],is_nonstop:true,travel_date:'2026-10-02',source:'dummy',is_outlier:false,is_imputed:false}))};}
+    const items=data.items||[], pages=Math.max(1,Math.ceil(data.total/data.page_size));
+    $('#fareSummary').textContent=`Page ${data.page} of ${pages} · ${data.total} cleaned observations`;
+    $('#faPrev').disabled=data.page<=1; $('#faNext').disabled=data.page>=pages;
+    table($('#fareTable'),['ID','Observed','Route','Carrier','Flight','Cabin','Total fare','APD','Nonstop','Breakdown','Source'],
+      items.map(f=>[f.id,f.observation_date,`${f.origin_iata}-${f.destination_iata}`,f.carrier_iata,f.flight_number||'—',f.cabin_class||'—',money(f.total_fare_inr),f.advance_purchase_days,f.is_nonstop?'Yes':'No',f.has_full_breakdown?'Yes':'No',f.source||'—']));
+  }
+  async function backtest(){
+    let data; try{data=await api('/backtest');}catch{data={method:'median',months_compared:3,correlation:.91,mean_abs_deviation_pct:6.8,benchmark_source:'dummy_dgca',table:[['2026-07',101.2,97.4,3.9],['2026-08',104.7,102.1,2.5],['2026-09',108.4,111.0,-2.3]].map(r=>({month:r[0],apix:r[1],benchmark:r[2],deviation_pct:r[3]}))};}
+    $('#btStats').innerHTML=[
+      ['Method',data.method],['Months compared',data.months_compared],['Correlation',data.correlation==null?'n/a':Number(data.correlation).toFixed(3)],['Mean absolute deviation',data.mean_abs_deviation_pct==null?'n/a':data.mean_abs_deviation_pct+'%'],['Benchmark source',data.benchmark_source]
+    ].map(([a,b])=>`<div class="rounded-2xl bg-white/60 p-4"><div class="text-[10px] font-semibold uppercase tracking-[.12em] text-muted">${a}</div><div class="mt-1 text-lg font-semibold">${b}</div></div>`).join('');
+    const t=data.table||[];
+    table($('#btTable'),['Month','APIx','Benchmark','Deviation'],t.map(r=>[r.month,Number(r.apix).toFixed(2),Number(r.benchmark).toFixed(2),`${Number(r.deviation_pct).toFixed(2)}%`]));
+    chart('backtestChart',t.map(r=>r.month),[
+      ds('APIx',t.map(r=>Number(r.apix)),{fill:false}),
+      ds('Benchmark',t.map(r=>Number(r.benchmark)),{borderColor:'#8d8b84',pointBackgroundColor:'#8d8b84',backgroundColor:'transparent',fill:false})
+    ]);
+  }
+
+  function selectView(name){
+    $$('.view').forEach(v=>v.classList.toggle('hidden',v.id!=='view-'+name));
+    $$('.nav-btn').forEach(b=>b.classList.toggle('nav-active',b.dataset.view===name));
+    location.hash=name;
+    const fn={overview, routes:renderRoutes,'route-index':routeIndex,heatmap,elasticity,fares,backtest}[name];
+    if(fn) fn().catch(e=>showError(e.message));
+    $('#mobileNav').classList.add('hidden');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  function bind(){
+    $('#modeLive').onclick=()=>setMode('http://127.0.0.1:8000');
+    $('#modeDemo').onclick=()=>setMode('http://127.0.0.1:8001');
+    $$('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
+    $('#mobileMenu').onclick=()=>$('#mobileNav').classList.toggle('hidden');
+    ['ovFrequency','ovMethod'].forEach(id=>$('#'+id).onchange=overview);
+    ['riRoute','riFrequency','riApd','riMethod'].forEach(id=>$('#'+id).onchange=routeIndex);
+    $('#hmRender').onclick=heatmap;
+    $('#elRoute').onchange=elasticity;
+    $('#fareForm').onsubmit=e=>{e.preventDefault();farePage=1;fares();};
+    $('#faPrev').onclick=()=>{if(farePage>1){farePage--;fares();}};
+    $('#faNext').onclick=()=>{farePage++;fares();};
+  }
+
+  async function init(){
+    document.querySelectorAll('.control').forEach(el=>el.classList.add('rounded-2xl','border','border-black/10','bg-white/60','px-4','py-3','text-sm','outline-none','transition','focus:border-black/30','focus:ring-2','focus:ring-black/5'));
+    const mode = API_BASE.indexOf('8001') !== -1 || (!API_BASE && location.port === '8001') ? 'demo' : 'live';
+    $('#dataBadge').textContent = mode === 'demo' ? 'Demo · simulated history' : 'Live · real data';
+    ['modeLive','modeDemo'].forEach(id=>{
+      $('#'+id).classList.toggle('bg-[#11110f]',id==='mode'+(mode==='live'?'Live':'Demo'));
+      $('#'+id).classList.toggle('text-white',id==='mode'+(mode==='live'?'Live':'Demo'));
+    });
+    const today=new Date(), thirty=new Date(today); thirty.setDate(today.getDate()-30);
+    const tomorrow=new Date(today); tomorrow.setDate(today.getDate()+1);
+    $('#hmFrom').value=thirty.toISOString().slice(0,10); $('#hmTo').value=today.toISOString().slice(0,10);
+    $('#faTravFrom').value=tomorrow.toISOString().slice(0,10); $('#faTravTo').value=tomorrow.toISOString().slice(0,10);
+    await loadRoutes(); bind();
+    const initial=location.hash.slice(1); selectView(['overview','routes','route-index','heatmap','elasticity','fares','backtest'].includes(initial)?initial:'overview');
+    lucide.createIcons();
+  }
+  init();
+</script>
+</body>
+</html>

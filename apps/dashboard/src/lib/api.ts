@@ -435,3 +435,191 @@ export interface MarketBriefingData {
   };
 }
 
+export interface PolicySignalResponse {
+  status: string;
+  series: string;
+  series_type: string;
+  classification: "STRUCTURAL" | "TRANSIENT" | "NONE" | string;
+  evidence: {
+    mode: string;
+    reason: string;
+    baseline_median: number;
+    latest_index: number;
+    elevation_pct: number;
+    persistence_days: number;
+    episode_start: string | null;
+    calendar_aligned: boolean;
+    atf_aligned: boolean;
+    multi_carrier: boolean;
+    single_carrier: boolean;
+    carrier_breadth: number;
+    atf_move_pct: number | null;
+    structural_score: number;
+    transient_score: number;
+  };
+  policy_line: string;
+  disclosure: string;
+}
+
+export interface LeadingIndicatorResponse {
+  status: "COMPLETED" | "INSUFFICIENT_ALIGNMENT" | string;
+  aligned_weeks: number;
+  required_aligned_weeks: number;
+  lags: Array<{ lag_weeks: number; correlation: number }>;
+  best_lag_weeks: number | null;
+  methodology_disclosure: string;
+  benchmark_indicator: string;
+  prototype_series: string;
+  prototype_weeks: number;
+  benchmark_months: number;
+}
+
+export interface AnomalyAlert {
+  id: number;
+  series: string;
+  series_type: string;
+  observation_date: string;
+  anomaly_type: string;
+  severity: "LOW" | "MODERATE" | "SEVERE" | string;
+  z_score: number;
+  detected_value: number;
+  reference_median: number;
+  status: string;
+  detected_at: string;
+  resolved_at: string | null;
+  notes: string | null;
+  explanation: {
+    observation_date: string;
+    day_of_week: string;
+    matched_signals: string[];
+    atf_prime_move_pct: number | null;
+    atf_prime_price: number | null;
+    calendar: { matched_event: boolean; matched_date: string | null; event_label: string | null };
+    availability: {
+      sold_out_ratio_pct: number;
+      sold_out_quotes: number;
+      total_quotes: number;
+      distinct_carriers_sold_out: number;
+    };
+    plain_text: string;
+  } | null;
+}
+
+export interface AnomalyAlertsResponse {
+  total_alerts: number;
+  unexplained_count: number;
+  alerts: AnomalyAlert[];
+  methodology_disclosure: string;
+}
+
+export interface ConcentrationRoute {
+  route_code: string;
+  origin: string;
+  destination: string;
+  corridor_type: string;
+  observation_date: string;
+  horizon_days: number;
+  hhi: number;
+  hhi_band: "LOW" | "MODERATE" | "HIGH" | string;
+  carrier_count: number;
+  carriers: Array<{ carrier_code: string; quote_share_pct: number }>;
+  mean_fare: number;
+  std_fare: number;
+}
+
+export interface ConcentrationResponse {
+  status: string;
+  monitored_route_count: number;
+  network_avg_hhi: number;
+  high_concentration_routes: string[];
+  moderate_concentration_routes: string[];
+  correlation_hhi_vs_fare: number | null;
+  correlation_hhi_vs_volatility: number | null;
+  routes: ConcentrationRoute[];
+  cci_relevance: string;
+}
+
+export interface IntradayVolatilityRoute {
+  route_code: string;
+  origin: string;
+  destination: string;
+  observation_date: string;
+  travel_date: string | null;
+  intraday_volatility_cv: number;
+  intraday_volatility_pct: number;
+  windows_observed: number;
+  best_time_to_book: { window: string; mean_fare: number } | null;
+  windows: Array<{
+    window: string;
+    window_hour: string;
+    mean_fare: number;
+    min_fare: number;
+    max_fare: number;
+    sample_count: number;
+  }>;
+}
+
+export interface IntradayVolatilityResponse {
+  status: string;
+  network_avg_intraday_volatility_pct: number;
+  windows_captured_per_route: Array<{ route_code: string; windows_observed: number }>;
+  network_best_time_to_book: { window: string; mean_fare: number } | null;
+  routes: IntradayVolatilityRoute[];
+  interpretation: string;
+}
+
+export interface AvailabilityAdjustedRoute {
+  route_code: string;
+  origin: string;
+  destination: string;
+  observation_date: string;
+  horizon_days: number;
+  headline_fare: number;
+  sold_out_ratio: number;
+  scarcity_premium_pct: number;
+  availability_adjusted_fare: number;
+  implied_adjustment_pct: number;
+}
+
+export interface AvailabilityAdjustedResponse {
+  status: string;
+  observation_date: string;
+  horizon_days: number;
+  network_headline_fare: number;
+  network_availability_adjusted_fare: number;
+  network_scarcity_premium_pct: number;
+  network_sold_out_ratio: number;
+  network_implied_adjustment_pct: number;
+  methodology_disclosure: string;
+  routes: AvailabilityAdjustedRoute[];
+  interpretation: string;
+}
+
+export interface UdanRoute {
+  route_code: string;
+  origin: string;
+  destination: string;
+  corridor_type: string;
+  latest_fare: number;
+  latest_quote_date: string;
+  fare_period_avg: number;
+  trunk_median_fare: number;
+  ratio_vs_udan_target: number;
+  ratio_vs_trunk: number;
+  status: "BREACH" | "OK" | string;
+}
+
+export interface UdanResponse {
+  status: string;
+  observation_date: string;
+  horizon_days: number;
+  lookback_days: number;
+  udan_target_inr: number;
+  trunk_median_fare: number;
+  trunk_avg_fare: number;
+  breach_count: number;
+  breach_routes: string[];
+  routes: UdanRoute[];
+  policy_note: string;
+}
+

@@ -175,7 +175,10 @@ class AdaptiveExtractor:
         if allow_ocr is None:
             allow_ocr = _env_flag("EXTRACTION_ALLOW_OCR", settings.EXTRACTION_ALLOW_OCR)
 
-        self.ocr = ocr or OCRService()
+        ocr_backend = os.environ.get("EXTRACTION_OCR_BACKEND") or getattr(
+            settings, "EXTRACTION_OCR_BACKEND", "paddle"
+        )
+        self.ocr = ocr or OCRService(engine=ocr_backend)
         self.vlm = vlm or VLMService()
         self.layout = layout or LayoutClusterer()
         self.allow_vlm = allow_vlm
@@ -267,6 +270,14 @@ class AdaptiveExtractor:
                 ocr_fields = self.fields_from_tokens(tokens, ref)
             except ExtractionNotAvailable:
                 chain.append("OCR_SKIPPED")
+            except Exception as e:
+                # A missing/corrupt screenshot file or an internal engine
+                # crash must degrade the chain (fall through to VLM/DOM),
+                # never abort the whole extraction -- this stage runs on
+                # live-scraped screenshots that can legitimately be partial,
+                # deleted mid-race, or in an unsupported format.
+                logger.warning("OCR stage failed on %s: %s", context.image_path, e)
+                chain.append("OCR_SKIPPED")
         elif not self.allow_ocr:
             chain.append("OCR_SKIPPED")
 
@@ -301,6 +312,11 @@ class AdaptiveExtractor:
                 ocr_fields.update(vlm_fields)
                 vlm_used = True
             except VLMNotConfigured:
+                chain.append("VLM_SKIPPED")
+            except Exception as e:
+                # Same rationale as the OCR stage above: a network timeout,
+                # backend 5xx, or corrupt image must not crash the pipeline.
+                logger.warning("VLM stage failed on %s: %s", context.image_path, e)
                 chain.append("VLM_SKIPPED")
 
         fields = {**dom_fields, **ocr_fields}

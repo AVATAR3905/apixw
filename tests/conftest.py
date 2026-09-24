@@ -5,6 +5,8 @@ import datetime
 import pytest
 
 from services.collectors import carrier_direct_scraper as cds_mod
+from services.collectors.ota import easemytrip_scraper as emt_mod
+from services.collectors.ota import ixigo_scraper as ixigo_mod
 
 
 @pytest.fixture
@@ -34,6 +36,29 @@ def carrier_baseline(monkeypatch):
         )
 
     monkeypatch.setattr(cds_mod.CarrierDirectScraper, "scrape_carrier_corridor", fake)
+
+    # Ixigo and EaseMyTrip now drive a real Playwright browser (see
+    # ixigo_scraper.py / easemytrip_scraper.py) -- route straight to each
+    # one's calibrated generator so this fixture's "no real browser" contract
+    # still holds for every OTA, not just carrier-direct.
+    def make_fake_ota_execute(cls):
+        def fake_execute(self, origin_airport, destination_airport, travel_date, advance_days):
+            return self._generate_calibrated_quotes(
+                origin_airport=origin_airport,
+                destination_airport=destination_airport,
+                travel_date=travel_date,
+                advance_days=advance_days,
+            )
+
+        return fake_execute
+
+    for module, cls_name in (
+        (ixigo_mod, "IxigoScraper"),
+        (emt_mod, "EaseMyTripScraper"),
+    ):
+        cls = getattr(module, cls_name)
+        monkeypatch.setattr(cls, "_execute_scrape", make_fake_ota_execute(cls))
+
     return cds_mod
 
 

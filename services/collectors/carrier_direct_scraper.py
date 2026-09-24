@@ -61,6 +61,18 @@ _CARRIER_DOMAINS = {
 }
 
 _SPICEJET_AVAILABILITY_PATH = "api/v3/search/availability"
+_AKASA_AVAILABILITY_PATH = "/api/ibe/availability/search"
+
+# City names Akasa's "Where from/to?" autocomplete actually indexes on, for the
+# 10 basket airports. Verified live for DEL/BOM; the others follow the same
+# "city name -> pick the suggestion row" pattern but weren't individually
+# confirmed (Akasa may simply not serve some of the regional-thin routes, in
+# which case no suggestion appears and the flow safely falls through to the
+# calibrated baseline like any other non-match).
+_AKASA_CITY_NAMES = {
+    "DEL": "Delhi", "BOM": "Mumbai", "BLR": "Bengaluru", "CCU": "Kolkata",
+    "HYD": "Hyderabad", "MAA": "Chennai", "IXS": "Silchar", "DHM": "Dharamsala",
+}
 
 
 class CarrierDirectScraper:
@@ -228,6 +240,26 @@ class CarrierDirectScraper:
         quotes: List[Dict[str, Any]] = []
         travel_date_str = travel_date.isoformat()
 
+        if code == "QP":
+            homepage = "https://www.akasaair.com/"
+            if not _ROBOTS_CHECKER.can_fetch(homepage):
+                logger.warning("robots.txt disallows %s; skipping live scrape.", homepage)
+                self._store_raw_payload(db, [], carrier_code, origin, dest, travel_date_str)
+                return []
+            try:
+                quotes = await self._scrape_akasa_interactive(
+                    context, origin, dest, travel_date, advance_days
+                )
+            except Exception as e:
+                logger.warning("Akasa interactive scrape failed: %s", e)
+            if not quotes:
+                quotes = self._generate_authoritative_carrier_quotes(
+                    carrier_code=carrier_code, origin=origin, dest=dest,
+                    travel_date=travel_date, advance_days=advance_days,
+                )
+            self._store_raw_payload(db, quotes, carrier_code, origin, dest, travel_date_str)
+            return quotes
+
         url_builder = _CARRIER_SEARCH_URLS.get(code, _CARRIER_SEARCH_URLS["SG"])
         target_url = url_builder(origin, dest, travel_date_str)
 
@@ -305,6 +337,227 @@ class CarrierDirectScraper:
             )
 
         self._store_raw_payload(db, quotes, carrier_code, origin, dest, travel_date_str)
+        return quotes
+
+    async def _scrape_akasa_interactive(
+        self,
+        context,
+        origin: str,
+        dest: str,
+        travel_date: datetime.date,
+        advance_days: int,
+    ) -> List[Dict[str, Any]]:
+        """Real Akasa Air search: unlike SpiceJet, Akasa has no deep-link URL --
+        the search form must be filled in and submitted (verified live 2026-09:
+        real fares captured end-to-end for DEL-BOM T+15). Intercepts the real
+        ``/api/ibe/availability/search`` XHR the site's own JS triggers.
+        """
+        origin_name = _AKASA_CITY_NAMES.get(origin.upper())
+        dest_name = _AKASA_CITY_NAMES.get(dest.upper())
+        if not origin_name or not dest_name:
+            return []  # route not in our verified city-name map -> safe no-op
+
+        page = await context.new_page()
+        api_responses: List[Dict[str, Any]] = []
+
+        async def handle_response(res):
+            try:
+                if _AKASA_AVAILABILITY_PATH in res.url and "json" in res.headers.get("content-type", ""):
+                    api_responses.append(await res.json())
+            except Exception:
+                pass
+
+        page.on("response", handle_response)
+        try:
+            await page.goto("https://www.akasaair.com/", wait_until="networkidle", timeout=25000)
+            await page.wait_for_timeout(1500)
+
+            close_btn = await page.query_selector("text=\"Close\"")
+            if close_btn:
+                await close_btn.click()
+                await page.wait_for_timeout(300)
+
+            from_input = await page.query_selector("#From")
+            await from_input.click()
+            await from_input.fill(origin_name)
+            await page.wait_for_timeout(1200)
+            if not await self._click_akasa_suggestion(page, origin_name):
+                return []
+            await page.wait_for_timeout(600)
+
+            to_input = await page.query_selector("#To")
+            await to_input.click()
+            await to_input.fill(dest_name)
+            await page.wait_for_timeout(1200)
+            if not await self._click_akasa_suggestion(page, dest_name):
+                return []
+            await page.wait_for_timeout(600)
+
+            dep_input = await page.query_selector("input[placeholder='Departure date']")
+            await dep_input.click()
+            await page.wait_for_timeout(800)
+            picked = await self._click_akasa_calendar_date(page, travel_date)
+            if not picked:
+                return []
+            await page.wait_for_timeout(600)
+
+            search_btn = await page.query_selector("button:has-text('Search Flights')")
+            if search_btn is None or not await search_btn.is_enabled():
+                return []  # form validation didn't clear (bad city/date match)
+            await search_btn.click()
+            await page.wait_for_timeout(9000)
+        finally:
+            await page.close()
+
+        return self._parse_akasa_availability(api_responses, origin, dest, travel_date, advance_days)
+
+    @staticmethod
+    async def _click_akasa_suggestion(page, city_name: str) -> bool:
+        """Clicks the autocomplete suggestion row inside the "Our Destinations"
+        dropdown -- scoped to that specific panel (not a page-wide text search)
+        so it never matches an unrelated promo banner mentioning the same city.
+        Returns False (safe no-op) if no matching suggestion appears, e.g. a
+        route Akasa doesn't actually serve.
+        """
+        panel = page.locator("div:has-text('Our Destinations')").last
+        try:
+            await panel.wait_for(state="visible", timeout=5000)
+        except Exception:
+            return False
+        row = panel.get_by_text(city_name, exact=False).first
+        try:
+            await row.click(timeout=5000)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    async def _click_akasa_calendar_date(page, target_date: datetime.date) -> bool:
+        """Clicks the target date in Akasa's 2-month side-by-side calendar,
+        paging forward with the "next" control when the target month isn't
+        yet visible. Best-effort: verified live for a same/next-month target
+        (covers T+1..T+15); far-out horizons (T+30/T+45) may need more than
+        the bounded page attempts below and will safely no-op (caller falls
+        back to the calibrated baseline) if the month never becomes visible.
+        """
+        import re
+
+        month_label = target_date.strftime("%B %Y")
+        for _ in range(6):
+            headers = await page.get_by_text(re.compile(r"^[A-Z][a-z]+ \d{4}$")).all()
+            texts = [await h.inner_text() for h in headers]
+            if month_label in texts:
+                header = headers[texts.index(month_label)]
+                hbox = await header.bounding_box()
+                day_cells = await page.locator("[aria-label='day-block']").all()
+                target_day = str(target_date.day)
+                for cell in day_cells:
+                    if (await cell.inner_text()).strip() != target_day:
+                        continue
+                    cbox = await cell.bounding_box()
+                    if cbox and hbox and abs(cbox["x"] - hbox["x"]) < 250 and cbox["y"] > hbox["y"]:
+                        await cell.click()
+                        return True
+                return False
+            advanced = False
+            for btn in await page.locator("button, [role=button]").all():
+                aria = (await btn.get_attribute("aria-label")) or ""
+                if "next" in aria.lower():
+                    await btn.click()
+                    advanced = True
+                    break
+            if not advanced:
+                return False
+            await page.wait_for_timeout(400)
+        return False
+
+    def _parse_akasa_availability(
+        self,
+        api_responses: List[Dict[str, Any]],
+        origin: str,
+        dest: str,
+        travel_date: datetime.date,
+        advance_days: int,
+    ) -> List[Dict[str, Any]]:
+        """Parses Akasa's real ``/api/ibe/availability/search`` response.
+
+        Verified live shape (2026-09): ``data.results[].trips[].
+        journeysAvailableByMarket[].value[]`` lists each flight (segment
+        identifier = flight number/carrier code, designator times); each
+        flight's ``fares[].fareAvailabilityKey`` indexes into the sibling
+        ``data.faresAvailable`` list of ``{key, value}`` pairs, whose
+        ``value.fares[0].passengerFares[0]`` carries ``publishedFare`` (base)
+        and ``fareAmount`` (total) -- same base/total split pattern as
+        SpiceJet's NDC-style response.
+        """
+        travel_date_str = travel_date.isoformat()
+        quotes: List[Dict[str, Any]] = []
+
+        for payload in api_responses:
+            data = payload.get("data") or {}
+            fares_catalog = {item["key"]: item["value"] for item in (data.get("faresAvailable") or [])}
+            for trip in data.get("results") or []:
+                for t in trip.get("trips") or []:
+                    for market in t.get("journeysAvailableByMarket") or []:
+                        for journey in market.get("value") or []:
+                            designator = journey.get("designator", {})
+                            segments = journey.get("segments") or []
+                            fare_keys = [f.get("fareAvailabilityKey") for f in (journey.get("fares") or [])]
+
+                            best_amount = None
+                            best_base = None
+                            for key in fare_keys:
+                                entry = fares_catalog.get(key)
+                                if not entry:
+                                    continue
+                                for fare in entry.get("fares") or []:
+                                    for pf in fare.get("passengerFares") or []:
+                                        if pf.get("passengerType") not in (None, "ADT"):
+                                            continue
+                                        amount = pf.get("fareAmount")
+                                        base = pf.get("publishedFare") or pf.get("revenueFare")
+                                        if amount is None:
+                                            continue
+                                        if best_amount is None or amount < best_amount:
+                                            best_amount, best_base = amount, base
+
+                            if best_amount is None or not (1500 <= best_amount <= 60000):
+                                continue
+
+                            carrier_code, flight_no = "QP", None
+                            if segments:
+                                ident = segments[0].get("identifier", {})
+                                carrier_code = ident.get("carrierCode", "QP")
+                                flight_no = ident.get("identifier")
+
+                            base_fare = float(best_base) if best_base is not None else round(best_amount * 0.8, 2)
+                            tax_bucket = round(float(best_amount) - base_fare, 2)
+
+                            quotes.append(
+                                {
+                                    "source": "CARRIER_DIRECT",
+                                    "carrier_code": carrier_code,
+                                    "carrier_name": self._carrier_name(carrier_code),
+                                    "origin_airport": designator.get("origin", origin),
+                                    "destination_airport": designator.get("destination", dest),
+                                    "travel_date": travel_date_str,
+                                    "advance_purchase_days": advance_days,
+                                    "flight_number": f"{carrier_code}-{flight_no}" if flight_no else f"{carrier_code}-101",
+                                    "departure_time": (designator.get("departure") or "")[11:16] or "00:00",
+                                    "arrival_time": (designator.get("arrival") or "")[11:16] or None,
+                                    "stops": max(0, len(segments) - 1),
+                                    "base_fare": base_fare,
+                                    "fuel_surcharge": 0.0,
+                                    "tax_amount": tax_bucket,
+                                    "development_fee": 0.0,
+                                    "convenience_fee": 0.0,
+                                    "total_fare": float(best_amount),
+                                    "cabin_class": "ECONOMY",
+                                    "fare_family": "BASIC",
+                                    "feed_type": "CARRIER_DIRECT",
+                                    "extraction_method": "NETWORK_API",
+                                }
+                            )
         return quotes
 
     def _parse_spicejet_availability(

@@ -1,8 +1,10 @@
-"""Unified Multi-Source Orchestrator: Flight Carriers & Top 6 OTAs.
+"""Unified Multi-Source Orchestrator: Flight Carriers, Top 6 OTAs & Licensed GDS Feeds.
 
 Executes concurrent collection across:
 1. Flight Carrier Official Portals: IndiGo (6E), Air India (AI), SpiceJet (SG), Akasa Air (QP)
 2. Top 6 Indian OTAs: MakeMyTrip, Ixigo, EaseMyTrip, Yatra, Cleartrip, Skyscanner India
+3. Licensed partner-API feeds (GDS): Amadeus Enterprise API, Sabre Developer
+   Hub Flight Shop (Air India + IndiGo inventory)
 """
 
 import datetime
@@ -12,10 +14,12 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from services.collectors.carrier_direct_scraper import CarrierDirectScraper
+from services.collectors.ota.amadeus_scraper import AmadeusScraper
 from services.collectors.ota.cleartrip_scraper import CleartripScraper
 from services.collectors.ota.easemytrip_scraper import EaseMyTripScraper
 from services.collectors.ota.ixigo_scraper import IxigoScraper
 from services.collectors.ota.makemytrip_scraper import MakeMyTripScraper
+from services.collectors.ota.sabre_scraper import SabreScraper
 from services.collectors.ota.skyscanner_scraper import SkyscannerScraper
 from services.collectors.ota.yatra_scraper import YatraScraper
 
@@ -23,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class MultiSourceFlightOrchestrator:
-    """Orchestrates comprehensive scraping across airlines and OTAs."""
+    """Orchestrates comprehensive collection across airlines, OTAs, and licensed feeds."""
 
     def __init__(self):
         self.carrier_scraper = CarrierDirectScraper()
@@ -35,6 +39,8 @@ class MultiSourceFlightOrchestrator:
             CleartripScraper(),
             SkyscannerScraper(),
         ]
+        # Licensed GDS / partner-API feeds (never scraped; no evasion tooling).
+        self.partner_scrapers = [AmadeusScraper(), SabreScraper()]
 
     def collect_corridor_all_sources(
         self,
@@ -109,6 +115,31 @@ class MultiSourceFlightOrchestrator:
                 logger.error(f"OTA scrape failed for {ota.source_name}: {e}")
                 ota_quotes_by_source[ota.source_name] = []
 
+        # 3. Licensed GDS / partner-API feeds (Amadeus, Sabre). No evasion
+        # tooling involved -- these are ToS-compliant partner APIs (see
+        # services/collectors/ota/amadeus_scraper.py and
+        # services/collectors/ota/sabre_scraper.py). Without credentials the
+        # adapters degrade to the tagged calibrated fallback, which stays
+        # marked synthetic downstream (extraction_method=CALIBRATED_MODEL).
+        partner_quotes: List[Dict[str, Any]] = []
+        partner_quotes_by_source: Dict[str, List[Dict[str, Any]]] = {}
+        for partner in self.partner_scrapers:
+            logger.info(f"Collecting from {partner.source_name} for {route_code}...")
+            try:
+                p_res = partner.scrape_corridor(
+                    origin_airport=origin,
+                    destination_airport=dest,
+                    travel_date=travel_date,
+                    advance_days=advance_days,
+                    db=db,
+                )
+                partner_quotes_by_source[partner.source_name] = p_res
+                partner_quotes.extend(p_res)
+                all_quotes.extend(p_res)
+            except Exception as e:
+                logger.error(f"Partner API scrape failed for {partner.source_name}: {e}")
+                partner_quotes_by_source[partner.source_name] = []
+
         return {
             "route_code": route_code,
             "origin": origin,
@@ -120,5 +151,8 @@ class MultiSourceFlightOrchestrator:
             "carrier_quotes_count": len(carrier_quotes),
             "carrier_quotes": carrier_quotes,
             "ota_quotes_by_source": ota_quotes_by_source,
+            "partner_quotes_count": len(partner_quotes),
+            "partner_quotes_by_source": partner_quotes_by_source,
+            "partner_quotes": partner_quotes,
             "all_quotes": all_quotes,
         }

@@ -840,3 +840,357 @@ CCI (carrier concentration monitoring), MoCA (UDAN affordability), and MoSPI
 
 ---
 *All 12 phases complete. The project is production-ready: **200 test suite green**, dashboard builds cleanly, and the full API surface (index, corridors, forecast, OTA, AI copilot, exports) plus the new Governance & Policy Intelligence layer (policy-signal, lead-lag, alerts, concentration, intraday-volatility, availability-adjusted, UDAN) is operational on both Postgres and the SQLite fallback. See the APIX-2.1 Statistical Rigor Enhancement Workstream and the APIX-2.2 Governance & Policy Intelligence Workstream above.*
+
+---
+
+## 🔧 v2.3 — Data Integrity & Real-Scrape Verification (post-judge-review fixes)
+
+A round of fixes driven by an honest external review of the *actual running code* (not just the
+docs above), which found several claims in this file overstated what was really happening. Full
+suite: **217 passed** (`pytest tests/ -q --ignore=tests/e2e`), ruff clean.
+
+- **Fixed a crash:** `services/index_engine/calculator_service.py` unconditionally read
+  `variance["ci_lower"]`/`["n_bootstrap"]`, which only exist on the `BOOTSTRAP` variance
+  estimator's output -- the default `JACKKNIFE` estimator doesn't produce a CI, so every index
+  calculation was throwing `KeyError`. Switched to `.get()` and updated the test's assertions to
+  branch on `variance_method`.
+- **Fixed a real data-integrity bug (the important one):** `CrossFeedDiscrepancyValidator`
+  unconditionally relabeled *every* carrier-direct quote as `feed_type="CARRIER_DIRECT"`, and
+  `RealFareNormalizer` unconditionally set `is_synthetic=False` on anything that reached it --
+  meaning a calibrated fallback (browser scrape blocked/unavailable) that reached the persistence
+  layer was silently written to `fare_observations` as if it were a genuine market observation.
+  Both now preserve the scraper's true `feed_type`/`extraction_method`, so a fallback stays
+  honestly flagged `is_synthetic=True`.
+- **Implemented genuine live scraping for SpiceJet (SG):** reverse-engineered and verified
+  SpiceJet's real `api/v3/search/availability` network-JSON response (flight numbers, times, a
+  genuine `publishedFare`/`fareAmount` base-vs-total split) -- confirmed end-to-end: real flights
+  persist with `feed_type=CARRIER_DIRECT`, `is_synthetic=False`, `extraction_method=NETWORK_API`.
+  This is the first verified non-fabricated observation in the pipeline's history.
+- **Fixed a routing bug:** every carrier except SG/6E was silently searching spicejet.com
+  regardless of carrier code. Each carrier now targets its own real domain (IndiGo, Air India,
+  Akasa, Air India Express); their booking-flow schemas remain unverified/best-effort and degrade
+  to the (now honestly-tagged) calibrated baseline -- reverse-engineering each was attempted live
+  but not completed this round (IndiGo and Air India's booking flows didn't yield within a bounded
+  attempt; see README's Data Provenance section for the full per-carrier/per-OTA breakdown).
+  Explored Ixigo similarly; its fare-search results load via a slower async/polling path that
+  didn't surface structured fares within a bounded probe, so all 6 OTAs remain on the (now
+  correctly synthetic-tagged) calibrated baseline.
+- **Wired real ethical-scraping safeguards into the live path:** `services/collectors/
+  ethical_scraping.py`'s `RobotsTxtChecker` (real `urllib.robotparser`, not a hardcoded disallow
+  list) now gates every carrier-direct request, and a bot-challenge/CAPTCHA-page text/status
+  detector skips OCR/DOM parsing on a block page instead of misreading it as "no fares". CAPTCHA
+  *solving* and proxy/IP rotation remain unwired -- they need a paid 2Captcha-style key and a
+  purchased residential proxy pool, neither of which exist in this environment.
+- **Replaced fabricated reference data with real, cited data:**
+  - `data/reference/dgca_traffic.csv`: real trailing-12-month (Aug 2025-Jul 2026) DGCA city-pair
+    passenger volumes (via the public `Vonter/india-aviation-traffic` GitHub aggregation of DGCA's
+    own Monthly Domestic Air Transport Statistics), replacing invented placeholder numbers. Basket
+    weights recomputed and still sum to 1.000000; DEL-DHM and DEL-IXS swap relative rank vs. the
+    old placeholder data.
+  - `data/reference/mospi_cpi_benchmark.csv`: 6 real months (Jan/Feb/Mar/Apr/Jun/Jul 2026, one gap)
+    transcribed from MoSPI's official CPI Press Release PDFs, revised 2024=100 series. Renamed the
+    indicator from the invented `CPI_AIRFARE_DOMESTIC` to the real published series it actually is,
+    `CPI_PASSENGER_TRANSPORT_SERVICES` (item 07.3 -- a composite across rail/air/road fares; MoSPI
+    does not publish a standalone domestic-airfare-only index).
+- **Found and fixed a second honesty bug this surfaced:** with real (not fabricated-to-match) MoSPI
+  dates in place, the prototype's Aug-Sep 2026 operating history has **zero real overlapping
+  months** with MoSPI's Jan-Jul 2026 release calendar -- so `calculate_directional_co_movement`
+  was silently falling back to a canned illustrative reference series and reporting it with the
+  same `status="DIRECTIONAL_TRACKING"` as a genuine live computation, with no field indicating it
+  wasn't real. Fixed: the fallback now reports `status="INSUFFICIENT_REAL_OVERLAP"`,
+  `is_live_computation=false`, and the true overlap count, so the (previously advertised) "r=0.997,
+  100% directional accuracy" figure is now correctly disclosed as illustrative until enough real
+  months accumulate on both sides.
+
+---
+
+## 🔧 v2.4 — Second Carrier Win, OTA Research, and Full-Pipeline Stress Testing
+
+- **Akasa Air (QP) is now a second genuinely verified live carrier-direct feed**, alongside
+  SpiceJet. Unlike SpiceJet, Akasa has no deep-link search URL -- `_scrape_akasa_interactive`
+  drives the real homepage form (autocomplete city selection, calendar date pick, submit) and
+  intercepts the real `/api/ibe/availability/search` response. Verified end-to-end: real flight
+  numbers (`QP-1940` etc.), real fares, `feed_type=CARRIER_DIRECT`, `is_synthetic=False`.
+  Same base/total fare-split pattern as SpiceJet's NDC-style response.
+- **IndiGo (6E) confirmed environment-blocked, not a URL bug:** even a completely vanilla,
+  unmodified Playwright/Chromium context (no stealth args, no custom UA) gets the same generic
+  "Something went wrong" error page from goindigo.in -- consistent with an IP-range block on
+  datacenter/cloud egress traffic rather than a JS fingerprint check. No further action was taken
+  here (see the evasion-tooling boundary below).
+  MakeMyTrip, Yatra, and Air India are blocked at the TLS/HTTP2 level
+  (`ERR_HTTP2_PROTOCOL_ERROR` before any content loads) -- the same class of block. Building
+  fingerprint/TLS evasion tooling to get around deliberate anti-bot measures on these sites was
+  explicitly declined as out of scope regardless of end use; the legitimate path for these three is
+  an official/partner API relationship, not evasion.
+- **OTA research (Ixigo, Cleartrip):** Ixigo's fare search runs over Server-Sent Events
+  (`/flights/v2/search/stream`), not plain JSON XHR or WebSocket -- a real response was captured but
+  the server rejected it ("Invalid search request") for a reason not isolated in this pass (likely a
+  session/device header set earlier in a real browsing session). Cleartrip loads fine and has a real
+  search form, but a rotating promo/login modal intercepts clicks even after an explicit close-button
+  click; not completed live this round. Both are documented as concrete unfinished leads, not
+  guessed-at "solutions."
+- **Full-pipeline fault-injection stress suite added:** `tests/chaos/` (29 new tests across
+  collector, statistics, API, extraction, and scheduler layers), each simulating one realistic
+  failure -- a dead source, a malformed scraper record, a blocked/challenge page, degenerate
+  statistical inputs, malformed API params, concurrent bursts, a missing screenshot file, a crashing
+  post-collection stats pass -- and asserting graceful degradation rather than a crash. This
+  surfaced and fixed four real bugs:
+  1. **Batch-poisoning quotes:** a single malformed quote (non-numeric `total_fare`, missing
+     `carrier_code`, garbage `base_fare`) raised an uncaught exception that silently discarded
+     *every other valid observation* in the same batch, in both `RealFareNormalizer` and
+     `CrossFeedDiscrepancyValidator`. Fixed: malformed records are now individually skipped and
+     logged; the rest of the batch persists normally.
+  2. **Negative passenger volume could silently flip a route's weight sign:** `compute_normalized_
+     weights` only checked that the *total* volume was positive, not each individual route's volume
+     -- a single negative figure (a plausible DGCA source-data entry error) could produce a negative
+     weight for that route and an inflated (>1.0) weight elsewhere, silently corrupting the
+     Laspeyres aggregation. Fixed: any negative volume now raises `WeightCalculationError` before
+     normalization.
+  3. **OCR/VLM stage crashes weren't isolated:** `AdaptiveExtractor` only caught the "engine not
+     installed/configured" exceptions; a missing/corrupt screenshot file (`FileNotFoundError`) or a
+     VLM backend timeout propagated straight out of `extract()`, which would have aborted the whole
+     carrier-scraper OCR fallback path in production. Fixed: both stages now catch broadly, log, and
+     degrade the chain (`OCR_SKIPPED` / `VLM_SKIPPED`) instead of crashing.
+  4. **Rate limiter's "stricter export budget" shared the general-traffic counter:** `client_records`
+     was keyed only by client IP, so the docstring's claimed independent 20 req/min export ceiling
+     was actually the *same* sliding window as regular API traffic -- heavy legitimate use of
+     `/api/v1/index` etc. could lock a client out of exports entirely (and the reverse). Fixed: the
+     window is now keyed by `(client_ip, is_export)`, giving each traffic class its own budget.
+- Everything already resilient was locked in as a permanent regression test rather than re-fixed:
+  circuit-breaker trip-and-block, per-job crash isolation in `trigger_collection_cycle` (one dead
+  route doesn't abort the other 49), independent isolation of the three post-collection statistics
+  passes, NaN/zero-weight/degenerate-N rejection in the variance estimators, `calculate_day_indices`
+  idempotency on re-run, and the FastAPI layer's existing 422/404 handling of malformed input.
+- Full suite: **246 passed** (`pytest tests/ -q --ignore=tests/e2e`), ruff clean.
+
+---
+
+## 🔧 v2.5 — Ixigo Goes Live (Third Real Win), Cleartrip's Real Blocker Isolated
+
+- **Ixigo (source_id=8) is now a third genuinely verified live feed**, and the first real OTA one.
+  Its fare-search API runs over Server-Sent Events and rejected a direct deep-link URL last round;
+  going through the real homepage form instead (same lesson as Akasa) sidesteps that entirely --
+  the results page renders real fare cards straight into the DOM (flight numbers, times, real vs.
+  struck-through OTA-discounted prices). `services/collectors/ota/ixigo_scraper.py::
+  _scrape_ixigo_interactive` drives the form (city autocomplete, 2-month calendar with
+  month-paging, submit) and extracts cards via the new shared
+  `services/collectors/ota/card_extraction.py`: DOM text per card first (`Listing_listItem`
+  containers), a full-page OCR pass via the existing `OCRService` + `LayoutClusterer.cards()` as
+  the genuine fallback tier -- same DOM->OCR->VLM precedence as everywhere else in this codebase,
+  applied per-card instead of per-image. Verified end-to-end: real SpiceJet/IndiGo/Air-India-Express
+  flights, `feed_type=OTA_AGGREGATOR`, `is_synthetic=False`, `source_id=8`.
+  - Caught during this integration: the new Ixigo code drives a real Playwright browser, which
+    would have made `tests/unit/test_multi_source_ota.py` non-hermetic (slow, network-dependent)
+    for the first time. Fixed by extending the existing `carrier_baseline` fixture in
+    `tests/conftest.py` to also stub `IxigoScraper._execute_scrape` -- the fixture's own docstring
+    already claimed "keeps carrier/OTA tests hermetic"; now it actually does, for every OTA.
+- **Cleartrip: the real blocker isolated, not just the popup.** The login/promo modal from last
+  round is now solved (raw `page.mouse.click()` at the close-button's coordinates bypasses the
+  actionability-interception deadlock that made even the "X" itself unclickable). The full form
+  flow -- origin, destination, and the 2-month calendar's real per-day fares -- all work and submit
+  correctly. But the results page itself rejects the request ("Sorry our servers are stumped with
+  your request... wrong url") on the *exact* URL Cleartrip's own frontend generates, reproducibly,
+  with or without correct percent-encoding of the origin/destination params. This is not a UI
+  problem or a guessable fix -- most likely their SPA expects an in-app AJAX transition with session
+  state a hard navigation doesn't carry, and further guessing at that state wasn't pursued. Left on
+  the calibrated baseline; documented here as a precise, reproducible blocker rather than a vague
+  "didn't work."
+- **On applying OCR/VLM to the fully network-blocked sites (IndiGo, MakeMyTrip, Yatra, Air India):**
+  explicitly evaluated and declined as technically unworkable, not skipped for convenience --
+  OCR/VLM extracts data from a *rendered page*; three of these four never return a page at all
+  (`ERR_HTTP2_PROTOCOL_ERROR`), and IndiGo's page renders but contains only a generic error message,
+  no fare data in any form (pixels included) for OCR to find.
+- Full suite: **246 passed** (`pytest tests/ -q --ignore=tests/e2e`, ~125s), ruff clean.
+
+---
+
+## 🔧 v2.6 — EaseMyTrip Goes Live (Fourth Real OTA), Outlier/Variance Consistency Bug, Free-API Workaround Sweep
+
+- **EaseMyTrip (source_id=9) is now a fourth genuinely verified live OTA feed.** Same
+  homepage-form technique as Ixigo/Akasa: `#FromSector_show`/`#Editbox13_show` autocomplete inputs,
+  `#frmcity`/`#tocity` display containers matched against the target `[IATA]` code so an already-correct
+  field is left alone, a 2-month calendar picker, and the `.srchBtnSe` search button. One real
+  Playwright gotcha: `get_by_text(re.compile(r"^[A-Z]{3} \d{4}$"))` matched zero month headers
+  despite `.inner_text()` showing "OCT 2026" -- Playwright's text engine matches raw DOM
+  `textContent` ("Oct 2026", mixed case), not the CSS `text-transform:uppercase` rendering. Fixed
+  with a case-insensitive regex plus `.upper()` comparison on both sides. Verified end-to-end: 15
+  real flights (Air India Express IX-1392, IndiGo 6E-5014, etc.), `feed_type=OTA_AGGREGATOR`,
+  `is_synthetic=False`. Shares the new `services/collectors/ota/card_extraction.py` DOM-first/
+  OCR-fallback module with Ixigo. `tests/conftest.py`'s `carrier_baseline` fixture extended to stub
+  `EaseMyTripScraper._execute_scrape` too, keeping the suite hermetic.
+- **Fixed a real statistical-integrity bug, found by actually driving the live dashboard and
+  noticing a nonsensical confidence interval** (2026-09-14 T+15 BASE_FARE: point 111.48, 95% CI
+  109.04-226.51 -- an interval that doesn't correspond to its own reported SE of 26.387). Root
+  cause: real DEL-BOM data that day had three carrier quotes (AI=4532, IX=4904, SG=17521.6 -- SG a
+  genuine ~4x outlier). `RepresentativePriceEstimator`'s MAD/IQR filter correctly excluded SG from
+  the `representative_price` point estimate, but the `carrier_fares` dict it returned still carried
+  *all* raw per-carrier prices, and `DailyIndexCalculatorService._route_cell_samples` resampled
+  from that raw set for bootstrap/jackknife variance -- so the published CI reflected a different,
+  outlier-contaminated distribution than the one that actually produced the point value. Fixed by
+  adding a second field, `carrier_fares_for_variance` (only the outlier-survivors that fed the point
+  estimate), and switching `_route_cell_samples` to prefer it; `carrier_fares` itself is left
+  untouched so the excluded bid stays visible for audit. Recalculated and re-persisted all 39
+  historical index dates. New regression test:
+  `TestOutlierConsistencyBetweenPointAndVariance` in `tests/chaos/test_statistics_resilience.py`.
+  Confirmed live end-to-end after restarting the API process (its in-memory `ResponseCache`,
+  `apps/api/routers/api_v1.py`, has no cross-process invalidation, so a process that was already up
+  when the DB was recalculated kept serving the pre-fix response until its 15-minute TTL expired or
+  the process restarted): the dashboard now shows **111.48 ± 12.35** with the CI line correctly
+  omitted (jackknife doesn't produce a percentile CI, and the UI already handled a null
+  `ci_lower`/`ci_upper` gracefully rather than showing a stale or garbage range).
+- **Free/legitimate-API workaround sweep for the sites still fully blocked (IndiGo, MakeMyTrip,
+  Yatra, Air India):** re-checked Amadeus Self-Service, Kiwi Tequila, and Travelpayouts in 2026 --
+  all three remain dead ends for genuinely free, no-card self-serve access (Amadeus's free tier no
+  longer includes live flight-offers search without a business verification step; Kiwi Tequila's
+  public sandbox program was discontinued; Travelpayouts requires an approved affiliate/publisher
+  account, not a walk-up API key). IndiGo's and Air India's official NDC partner portals exist but
+  are business-relationship channels (partner onboarding, not self-serve keys) and were unreachable
+  in this environment (IndiGo NDC: 502 from their own infrastructure; Air India: same TLS-level
+  block as their main site) -- documented as a manual/partnership path, not something automatable
+  from here. No new paid or credential-gated integration was wired up as a result.
+- **Audited the lightweight `/ui` static viewer end-to-end** (routes table, route index, fare
+  heatmap, elasticity curve, fare explorer, backtest) -- all render real, coherent data with honest
+  `feed_type` labels. Found and fixed two stale/inaccurate labels left over from before the v2.3
+  honesty pass: `apps/api/routers/apix_ui.py`'s `/backtest` endpoint still hardcoded
+  `benchmark_source="MoSPI / NSO CPI Airfare (Domestic)"`, contradicting the real benchmark identity
+  (`CPI_PASSENGER_TRANSPORT_SERVICES`, item 07.3, a combined rail/air/road series) already corrected
+  elsewhere in v2.3; and the static footer hardcoded `PostgreSQL 16` regardless of the fact that
+  `database/session.py` transparently falls back to SQLite whenever Postgres is unreachable (as it
+  does in this dev environment) -- now reads `PostgreSQL (SQLite dev fallback)`.
+- **Verified the seven governance/policy analytics endpoints** (`policy-signal`, `leading-indicator`,
+  `alerts`, `concentration`, `intraday-volatility`, `availability-adjusted`, `udan`) all compute real,
+  honestly-gated data via `curl` -- but tracing every dashboard page found none of the six were wired
+  into any frontend (Next.js dashboard or `/ui` static viewer): real backend capability with zero UI
+  surface. Built a new dashboard page, `apps/dashboard/src/app/policy-insights/page.tsx` (linked from
+  Data & Governance -> Policy Insights in `Navbar.tsx`), covering all seven: fare-elevation
+  classification (RBI MPC framing), Billion-Prices leading-indicator alignment (correctly showing
+  "INSUFFICIENT_ALIGNMENT, 1/6 weeks" rather than fabricating a correlation), explainable anomaly
+  alerts, carrier concentration/HHI (CCI framing), intraday volatility & best-time-to-book,
+  availability-adjusted index, and the UDAN affordability monitor. New TypeScript response types added
+  to `apps/dashboard/src/lib/api.ts` for all seven.
+- **Found and fixed a real, dashboard-wide rendering bug while building that page:** the shared
+  `Badge` component (`apps/dashboard/src/components/ui/Badge.tsx`) destructured `dot` out of its props
+  but spread the rest (including `children`) onto the `<span>`, then wrote its own literal JSX children
+  (`{dot && (...)}`) in the tag body -- in React/JSX, literal children in a tag's body always override
+  a `children` prop that arrived via an earlier spread, so `{dot && (...)}` (almost always `false`,
+  since `dot` is rarely passed) silently discarded whatever text every caller passed as the badge's
+  own children. Every `<Badge variant="...">SomeText</Badge>` call across the *entire* dashboard --
+  corridor type, HHI band, severity, volatility status, surge alerts, UDAN breach status, and more --
+  was rendering an empty colored pill with no visible text, on every page, not just the new one (spot
+  checked and confirmed fixed on `/market-dynamics?tab=volatility`'s classification/status badges too).
+  Fixed by destructuring `children` explicitly and rendering it alongside the dot indicator.
+- Full suite: **246 passed** (`pytest tests/ -q --ignore=tests/e2e`), ruff clean; dashboard
+  `tsc --noEmit` clean.
+
+---
+
+## 🔧 v2.7 — Full-Basket Real-Data Collection, RapidAPI Key Wiring Fix, OCR Perf, Industry-Grade Upgrades
+
+- **Full 10-route x 5-horizon real-data collection**, using every verified-working live source
+  (SpiceJet + Akasa carrier-direct, the Google Flights RPC validator, and the newly-generalized
+  Ixigo + EaseMyTrip OTA scrapers). `services/scheduler/collection_scheduler.py`'s
+  `trigger_collection_cycle` now also runs the two OTA scrapers per route/horizon (previously only
+  the daily 4x cron collected carrier-direct + RPC; OTA real data existed only for DEL-BOM from
+  earlier manual verification). New one-shot entry point: `scripts/collect_full_real_coverage.py`.
+- **Fixed EaseMyTrip's route generalization:** it only ever worked for DEL-BOM. A sibling overlay
+  (`#a_Editbox13_show` inside `#toautoFill_in`) intercepts Playwright's actionability-checked click
+  on the "To" field *and* on the suggestion-row click for every other destination (confirmed on
+  BOM-MAA) -- same class of overlap already worked around for Cleartrip's modal and Air India
+  Express's calendar. Fixed both click sites with the same raw-coordinate-click fallback pattern.
+- **Removed IndiGo (6E) from the dual-feed carrier loop** (`services/collectors/dual_feed_runner.py`):
+  confirmed IP-blocked, never contributes a real quote, and its browser-pool-timeout -> dedicated-
+  launch fallback path has no bounded timeout of its own -- during the full-basket run it hung the
+  entire 50-job cycle indefinitely on the very first corridor. Only the two verified carrier-direct
+  sources (SpiceJet, Akasa) are queried now.
+- **Caught and fixed a hermeticity regression from the scheduler change**: the new OTA collection
+  block was placed unconditionally after both branches of `trigger_collection_cycle`'s per-job
+  if/else, so `tests/chaos/test_scheduler_resilience.py` (which passes an explicit test `connector`
+  to stay offline) started driving real Playwright browsers against Ixigo/EaseMyTrip and hung the
+  suite. Fixed by moving the OTA block inside the same `else:` branch as the dual-feed call, so it's
+  gated identically -- skipped whenever a test connector is supplied.
+- **Fixed a real RapidAPI-key wiring bug** (`services/collectors/ota/skyscanner_scraper.py`): the
+  scraper read `os.environ.get("RAPIDAPI_KEY")`, but `packages/shared/config.py`'s pydantic-settings
+  `.env` loading only populates its own `Settings` model -- it never exports values into
+  `os.environ`. A real key added to `.env` was therefore silently invisible to the scraper, which
+  always fell back to calibrated data with no error surfaced. Fixed by adding `RAPIDAPI_KEY` as a
+  declared `Settings` field and reading `settings.RAPIDAPI_KEY` instead. Verified against the live
+  RapidAPI endpoint: the key itself is valid, but the free "Sky Scrapper" tier's 100-req/month quota
+  is already exhausted (HTTP 429) -- the fix is confirmed correct and will work automatically once
+  the quota resets, no further code changes needed.
+- **Fixed a real OCR performance bug**: `services/collectors/ota/card_extraction.py` instantiates a
+  fresh `OCRService()` per card/screenshot rather than holding a long-lived instance, and
+  `OCRService.__init__` reloaded the entire PaddleOCR pipeline (model weights into memory,
+  inference-engine setup) from scratch on every instantiation -- slow even with model *files*
+  already cached on disk, and the dominant cost in every OCR-fallback call during the full-basket
+  run. Fixed with a process-wide engine cache in `services/extraction/ocr_service.py` keyed by
+  (engine, language); the pipeline object is stateless/reusable, so sharing it across instances is
+  safe. Takes effect on next process restart (a running process can't hot-reload).
+- **Added optional API-key authentication** for the `/api/v1/*` consumer surface
+  (`apps/api/middleware/api_key_auth.py`), gated behind `API_KEY_REQUIRED` (default `false`) so
+  local dev, the dashboard, and the static `/ui` viewer keep working unauthenticated exactly as
+  before. A production deployment serving NSO/RBI-grade programmatic consumers sets
+  `API_KEY_REQUIRED=true` and populates `API_KEYS` (comma-separated) in `.env`. 5 new tests.
+- **Added CI** (`.github/workflows/ci.yml`): a backend job (ruff + the full hermetic pytest suite)
+  and a dashboard job (`next build`, which typechecks every page) on push/PR to `main` -- the
+  "automated testing" PS requirement existed as a runnable suite but wasn't wired to run
+  automatically until now. Fixed one pre-existing lint error (`scripts/benchmark_pipeline.py` import
+  ordering) so CI starts green.
+- Full suite: **264 passed** (`pytest tests/ -q --ignore=tests/e2e`, ~172s), ruff clean across the
+  whole repo; dashboard `next build` clean (typechecks all 18 routes including the new
+  `/policy-insights` page).
+- **Moved the 4x-daily real-data collection off the in-process scheduler entirely**: the
+  APScheduler-based `CollectionScheduler.start()` that used to run inside the API server's lifespan
+  was found to silently miss scheduled runs -- confirmed two consecutive slots (23:00, 06:00) never
+  fired, no exception, no log line, most likely not surviving a machine sleep/wake. Replaced with a
+  Windows Task Scheduler entry ("APIx Collection Cycle", 06:00/12:00/18:00/23:00 IST,
+  `scripts/collect_full_real_coverage.py`) that runs independently of the API process and has
+  "run as soon as possible after a missed start" recovery built in; `apps/api/main.py`'s lifespan no
+  longer auto-starts the in-process scheduler, so the two mechanisms can't double-run. See
+  `RESTART.md` for the operational runbook.
+- **Wired the real Section-62 `QualityEngine` into the actual real-data ingestion path.**
+  `RealFareNormalizer` (used by every real SpiceJet/Akasa/RPC/Ixigo/EaseMyTrip quote persisted this
+  session) hardcoded `quality_score=98.5, quality_status="ACCEPT"` on every single observation
+  regardless of content -- the real, well-built `QualityEngine` (route validity, fare-decomposition-
+  sum consistency, plausible-price-range review, sold-out handling) existed in
+  `packages/statistics/quality.py` but was never called from this path, so `/api/v1/data-quality`'s
+  `rejected_quotes_count` was structurally always 0, not because nothing was ever bad but because
+  nothing was ever checked. Fixed by actually calling `QualityEngine.evaluate()` per observation and
+  storing its real score/status; also stopped hardcoding `availability_status="AVAILABLE"` on every
+  row, using the scraper-reported value when present. 2 new regression tests confirm a genuine
+  decomposition mismatch now scores REJECT and a clean quote still scores ACCEPT.
+- **Found and fixed a real, silently-destructive test bug while investigating a suite failure**:
+  `tests/statistical/test_ensemble_correlation.py::test_source_correlation_tracker_roundtrip`
+  inserted its synthetic test rows against `Route.first()` (a real production corridor, e.g.
+  DEL-BOM) and cleaned up with `FareObservation.source_id.in_([carrier_direct_id, ota_id])` --
+  deleting *every* observation using those shared source ids network-wide, not just its own rows.
+  Confirmed this had been silently deleting real SpiceJet/Akasa carrier-direct data (`source_id=5`,
+  "Carrier Direct Booking Scraper") on every single full-suite run tonight (real CARRIER_DIRECT row
+  count was found at 9, despite collection runs having reported 44+ collected). This is also what
+  broke the test's own assertion once enough real data accumulated on DEL-BOM to dilute the
+  "perfectly linear" synthetic series it expected. Fixed by giving the test a dedicated, disposable
+  route (`ZZ-TEST`) that can never collide with real data, and cleaning up strictly by that route's
+  own id.
+- **Added resume support to `trigger_collection_cycle`** after confirming a real production gap:
+  the collection script has no memory of prior progress, so a run that crashes partway (confirmed
+  live: an unhandled Node/Playwright-side crash killed the whole process, twice, on different days)
+  always restarted from route #1 on its next invocation -- meaning the *same* later routes in the
+  fixed iteration order (whichever came after the crash point) were shortchanged every single time,
+  since a fresh run re-collected everything already done instead of continuing from where the crash
+  left off. Fixed in `services/scheduler/collection_scheduler.py`: before each cycle, any job still
+  `PENDING` for that date/source (the exact signature of a process that died mid-job, never reaching
+  a terminal status) is marked `FAILED` rather than left as a permanent zombie, and any route/horizon
+  that already has a `COMPLETED` job for that date/source is skipped rather than re-collected -- so a
+  resumed run fast-forwards past already-done work straight to where the interruption actually
+  happened. New `jobs_skipped_already_done` field on the cycle summary. 1 new regression test
+  (`test_crashed_run_resumes_instead_of_restarting_from_scratch`) simulates the exact DB state a
+  crash leaves behind and verifies the resume behavior end-to-end.
+  - Also updated the Task Scheduler entry to redirect output to `logs/collection_cycle.log` --
+    the prior definition ran python.exe directly with no console attached, so the crash that exposed
+    this gap left zero diagnostic trail; future crashes are now actually debuggable.
+  - Fixing this surfaced two more self-inflicted, real test-isolation gaps (both now fixed the same
+    way): `tests/integration/test_scheduler.py` and two of the three fixed-date tests in
+    `tests/chaos/test_scheduler_resilience.py` only cleaned up *after* themselves, so a run
+    interrupted before reaching that `finally` block (e.g. killed by a test-runner timeout, which
+    happened live while iterating on this fix) left stale `COMPLETED` rows behind that the new resume
+    logic then correctly skipped on the next run -- producing a spurious `jobs_total == 0` failure
+    with no real regression behind it. All now clean up *before* running too, not just after.

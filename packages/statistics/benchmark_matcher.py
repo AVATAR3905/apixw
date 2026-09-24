@@ -102,8 +102,11 @@ class BenchmarkMatcherService:
         common_periods = sorted(list(set(proto_map.keys()) & set(mospi_map.keys())))
 
         if len(common_periods) < 3:
-            # Insufficient overlap for correlation, synthesize aligned comparison from reference trend
-            return cls._fallback_aligned_scorecard()
+            # Genuinely insufficient real overlap for a live correlation -- e.g. the
+            # prototype's operating history hasn't yet caught up to MoSPI's published
+            # months (official CPI is released 5-6 weeks in arrears). Return an
+            # honestly-labeled illustrative reference, never a real-looking number.
+            return cls._fallback_aligned_scorecard(actual_overlapping_periods=len(common_periods))
 
         proto_vals = np.array([proto_map[p] for p in common_periods])
         mospi_vals = np.array([mospi_map[p] for p in common_periods])
@@ -156,8 +159,16 @@ class BenchmarkMatcherService:
         }
 
     @classmethod
-    def _fallback_aligned_scorecard(cls) -> Dict[str, Any]:
-        """Provides calibrated reference validation scorecard matching PRD Section 33."""
+    def _fallback_aligned_scorecard(cls, actual_overlapping_periods: int = 0) -> Dict[str, Any]:
+        """Illustrative reference scorecard shown when real series don't yet overlap.
+
+        This is NOT a live computation -- it demonstrates the intended scorecard shape
+        using a fixed reference trend, clearly flagged as such via ``status`` and
+        ``is_live_computation``. The real overlap count (almost always 0, since MoSPI
+        publishes with a 5-6 week lag the prototype's young operating history hasn't
+        caught up to yet) is reported truthfully rather than being replaced by the
+        reference series' own length.
+        """
         ref_series = [
             {"period": "2025-10", "proto": 102.1, "mospi": 101.8},
             {"period": "2025-11", "proto": 104.5, "mospi": 103.9},
@@ -180,10 +191,17 @@ class BenchmarkMatcherService:
         rmse = float(np.sqrt(np.mean((np.array(proto_vals) - np.array(mospi_vals)) ** 2)))
 
         return {
-            "status": "DIRECTIONAL_TRACKING",
-            "benchmark_source": "MoSPI / NSO CPI Airfare Component (2012=100)",
-            "methodology_status": "HONEST_CO_MOVEMENT",
-            "overlapping_periods_count": len(ref_series),
+            "status": "INSUFFICIENT_REAL_OVERLAP",
+            "is_live_computation": False,
+            "benchmark_source": "MoSPI / NSO CPI Passenger Transport Services item 07.3 (2024=100)",
+            "methodology_status": "ILLUSTRATIVE_REFERENCE_ONLY",
+            "overlapping_periods_count": actual_overlapping_periods,
+            "note": (
+                "Fewer than 3 real overlapping months exist between the prototype's operating "
+                "history and MoSPI's published series (MoSPI releases CPI with a 5-6 week lag). "
+                "The metrics and comparative_series below are an illustrative reference scorecard "
+                "showing the intended output shape -- NOT a live-computed correlation."
+            ),
             "metrics": {
                 "directional_accuracy_pct": round(acc, 1),
                 "pearson_correlation_r": round(float(r_val), 3),

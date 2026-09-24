@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 # repeated reads cuts a presentation run from ~10+ min to the single real pass.
 _token_cache: dict = {}
 
+# Process-wide cache of loaded OCR engine handles, keyed by (engine, language).
+# Callers like card_extraction.py instantiate a fresh OCRService() per image/
+# card rather than holding a long-lived instance -- without this, every one of
+# those instantiations reloaded the PaddleOCR pipeline (model weights into
+# memory, inference-engine setup) from scratch, which is by far the slowest
+# part of the OCR fallback path even with model *files* already cached on
+# disk. The pipeline object itself is stateless/reusable across calls, so
+# sharing it here is safe and turns N reloads into one load per process.
+_engine_cache: dict = {}
+
 
 class ExtractionNotAvailable(Exception):
     """Raised when no OCR engine can be provisioned."""
@@ -76,7 +86,15 @@ class OCRService:
         if self._ocr is not None:
             return self._ocr
         if self.engine == "tesseract":
-            return self._load_tesseract(self.language)
+            self._ocr = self._load_tesseract(self.language)
+            return self._ocr
+
+        cache_key = (self.engine, self.language)
+        cached = _engine_cache.get(cache_key)
+        if cached is not None:
+            self._ocr = cached
+            return self._ocr
+
         try:
             from paddleocr import PaddleOCR
 
@@ -87,6 +105,7 @@ class OCRService:
                 self._ocr = PaddleOCR(lang=self.language, enable_mkldnn=False)
             else:
                 self._ocr = PaddleOCR(use_angle_cls=True, lang=self.language, show_log=False)
+            _engine_cache[cache_key] = self._ocr
             return self._ocr
         except ImportError as e:
             raise ExtractionNotAvailable(

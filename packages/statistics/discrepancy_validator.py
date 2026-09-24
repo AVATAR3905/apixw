@@ -7,12 +7,15 @@ while utilizing Google Flights RPC as:
 """
 
 import datetime
+import logging
 from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import Airline, DiscrepancyAudit, Route
 from packages.shared.time_utils import utcnow
+
+logger = logging.getLogger(__name__)
 
 
 class CrossFeedDiscrepancyValidator:
@@ -75,9 +78,13 @@ class CrossFeedDiscrepancyValidator:
 
         # Step 1: Evaluate all Carrier Direct quotes (Priority 1)
         for d_key, d_quote in direct_map.items():
-            c_code = d_quote["carrier_code"]
+            try:
+                c_code = d_quote["carrier_code"]
+                direct_price = float(d_quote["total_fare"])
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning("Skipping malformed carrier-direct quote (%s): %s", e, d_key)
+                continue
             a_id = airline_code_map.get(c_code, 1)
-            direct_price = float(d_quote["total_fare"])
             f_no = str(d_quote.get("flight_number", f"{c_code}-101"))
             dep = str(d_quote.get("departure_time", "08:00"))[:5]
 
@@ -112,8 +119,12 @@ class CrossFeedDiscrepancyValidator:
                 rpc_index = best_index
 
             if rpc_match is not None:
+                try:
+                    rpc_price = float(rpc_match["total_fare"])
+                except (KeyError, TypeError, ValueError):
+                    rpc_match = None
+            if rpc_match is not None:
                 rpc_consumed[rpc_index] = True
-                rpc_price = float(rpc_match["total_fare"])
                 r_fno = str(rpc_match.get("flight_number", f"{c_code}-101"))
                 matched_rpc_keys.add(f"{c_code}_{r_fno}")
                 diff = rpc_price - direct_price

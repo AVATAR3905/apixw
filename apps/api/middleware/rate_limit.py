@@ -1,7 +1,7 @@
 """Rate limiting middleware protecting API endpoints from abuse (Security Standard Sec 65)."""
 
 import time
-from typing import Dict
+from typing import Dict, Tuple
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,14 +12,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """In-memory sliding window rate limiter per client IP.
 
     Exempts /, /health, /docs*, /redoc, /openapi.json, and /ui* viewer paths.
-    Export paths (/export/*) receive a stricter 20 req/min ceiling.
+    Export paths (/export/*) receive their own, independent 20 req/min budget
+    -- separate from the general-traffic budget, so neither class can starve
+    the other for the same client.
     """
 
     def __init__(self, app, requests_per_minute: int = 120):
         super().__init__(app)
         self.requests_per_minute = requests_per_minute
-        # client_ip -> list of timestamps
-        self.client_records: Dict[str, list] = {}
+        # (client_ip, is_export) -> list of timestamps
+        self.client_records: Dict[Tuple[str, bool], list] = {}
 
     async def dispatch(self, request: Request, call_next):
         # Exclude docs, health, static viewer, and openapi from strict rate limiting
@@ -34,14 +36,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         now = time.time()
         window_start = now - 60.0
 
-        # Clean old timestamps
-        timestamps = self.client_records.get(client_ip, [])
-        timestamps = [t for t in timestamps if t > window_start]
+        # Export and general traffic are tracked as *independent* budgets per
+        # client. They used to share one counter keyed only by IP, which meant
+        # ordinary browsing (/api/v1/index, etc.) could burn through the same
+        # window and lock a client out of exports entirely despite never
+        # having called an export endpoint -- and conversely, a burst of
+        # export calls could starve that client's regular API access. Keying
+        # by (client_ip, is_export) gives each traffic class its own window.
+        is_export = "/export/" in request.url.path
+        record_key = (client_ip, is_export)
+        limit = 20 if is_export else self.requests_per_minute
 
-        limit = self.requests_per_minute
-        # Bulk export endpoints have a stricter limit
-        if "/export/" in request.url.path:
-            limit = 20
+        # Clean old timestamps
+        timestamps = self.client_records.get(record_key, [])
+        timestamps = [t for t in timestamps if t > window_start]
 
         if len(timestamps) >= limit:
             return JSONResponse(
@@ -55,7 +63,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             )
 
         timestamps.append(now)
-        self.client_records[client_ip] = timestamps
+        self.client_records[record_key] = timestamps
 
         response: Response = await call_next(request)
         response.headers["X-RateLimit-Limit"] = str(limit)

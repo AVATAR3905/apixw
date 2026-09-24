@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
+from apps.api.middleware.api_key_auth import APIKeyAuthMiddleware
 from apps.api.middleware.rate_limit import RateLimitMiddleware
 from apps.api.routers.ai_router import router as ai_router
 from apps.api.routers.api_v1 import router as api_v1_router
@@ -18,19 +20,45 @@ from services.scheduler.collection_scheduler import CollectionScheduler
 scheduler = CollectionScheduler()
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """StaticFiles that forces revalidation on every request.
+
+    Starlette's default StaticFiles sends Last-Modified/ETag but no explicit
+    Cache-Control, so browsers apply their own heuristic freshness and can
+    keep serving a stale index.html well after the file changes on disk --
+    confirmed repeatedly during development (an edit to static_ui/index.html
+    stayed invisible in an already-open tab even across full reloads, only
+    showing up with a cache-busting query param). "no-cache" still lets the
+    browser use its cached copy once the server confirms via ETag it's
+    unchanged, so this costs a cheap 304 round-trip, not a full re-download.
+    """
+
+    async def get_response(self, path: str, scope: Scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: apply additive schema migrations, then activate daily background scheduler
+    # Startup: apply additive schema migrations.
+    #
+    # The in-process APScheduler-based CollectionScheduler used to also start
+    # here to drive the 4x-daily real-data collection cycle, but it was found
+    # to silently miss scheduled runs with no error surfaced (confirmed: two
+    # consecutive slots never fired, no exception, no log entry -- likely an
+    # in-process background thread not surviving a machine sleep/wake). That
+    # responsibility now lives in a Windows Task Scheduler entry ("APIx
+    # Collection Cycle", see RESTART.md) which runs independently of whether
+    # this process is even up, and has "run as soon as possible after a
+    # missed start" recovery built in. `scheduler` is kept as a manually
+    # callable object (e.g. via /api/v1/collection/trigger-cycle) but is no
+    # longer auto-started here, so the two mechanisms don't double-run.
     try:
         init_db()
         print("[*] Database schema synchronized (incl. additive migrations).")
     except Exception as e:
         print(f"[!] Warning: Database schema sync exception: {e}")
-    try:
-        scheduler.start(cron_hour=18, cron_minute=0)
-        print("[*] Background CollectionScheduler running: Daily cron set to 18:00 IST.")
-    except Exception as e:
-        print(f"[!] Warning: CollectionScheduler startup exception: {e}")
     yield
     # Shutdown
     scheduler.stop()
@@ -135,6 +163,9 @@ The **India Airfare Price Observatory** is an institutional econometric platform
 # Rate limiting middleware
 app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 
+# Optional API-key auth for /api/v1/* (off by default -- see middleware docstring)
+app.add_middleware(APIKeyAuthMiddleware)
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
@@ -153,7 +184,7 @@ app.include_router(apix_ui_router)
 # New single-file APIx viewer (AyushyaRanjan/APIx frontend) at /ui
 _ui_dir = os.path.join(os.path.dirname(__file__), "static_ui")
 if os.path.isdir(_ui_dir):
-    app.mount("/ui", StaticFiles(directory=_ui_dir, html=True), name="ui")
+    app.mount("/ui", NoCacheStaticFiles(directory=_ui_dir, html=True), name="ui")
 
 
 @app.get("/")

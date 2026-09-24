@@ -38,6 +38,7 @@ def available_fares(observations: List[Any], price_field: str = "base_fare") -> 
 FEED_QUALITY_WEIGHTS = {
     "CARRIER_DIRECT": 1.0,
     "RPC_FALLBACK": 0.9,
+    "PARTNER_API": 0.85,  # licensed GDS feed: fee-bundled, below carrier-direct
     "OTA_AGGREGATOR": 0.7,
     "SYNTHETIC_BASELINE": 0.3,
 }
@@ -45,6 +46,7 @@ FEED_QUALITY_WEIGHTS = {
 FEED_QUALITY_SCORE = {
     "CARRIER_DIRECT": 100,
     "RPC_FALLBACK": 90,
+    "PARTNER_API": 85,
     "OTA_AGGREGATOR": 70,
     "SYNTHETIC_BASELINE": 30,
 }
@@ -265,7 +267,19 @@ class RepresentativePriceEstimator:
             "carrier_count": len(carrier_min_fares),
             "carrier_count_after_outlier_filter": len(outlier_filtered_prices),
             "total_observations_evaluated": len(valid_quotes),
+            # Raw per-carrier minimums (all carriers, including any the outlier
+            # filter below excluded from the point estimate) -- kept for
+            # transparency/audit so a flagged bid is still visible.
             "carrier_fares": {c: round(f, 2) for c, f in carrier_min_fares.items()},
+            # The subset that actually fed `representative_price` above. Bootstrap
+            # variance must resample from *this* set, not the raw one: resampling
+            # the raw carrier_fares would let a MAD/IQR-excluded outlier (e.g. one
+            # carrier quoting 4x its peers) drag the published CI into a
+            # different, contaminated distribution than the one the point value
+            # itself was computed from.
+            "carrier_fares_for_variance": {
+                c: round(f, 2) for c, f in carrier_min_fares.items() if c in contributing_carriers
+            },
             "carrier_feed_quality": carrier_feed_info,
             "min_carrier_price": round(float(np.min(outlier_filtered_prices)), 2),
             "max_carrier_price": round(float(np.max(outlier_filtered_prices)), 2),

@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     API_ENV: str = "development"
     API_CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # API key auth for the /api/v1/* consumer surface (e.g. NSO/RBI-grade
+    # programmatic access). Off by default so local dev, the dashboard, and
+    # the static /ui viewer keep working unauthenticated exactly as before;
+    # flip API_KEY_REQUIRED=true and populate API_KEYS (comma-separated) to
+    # require an X-API-Key header in production.
+    API_KEY_REQUIRED: bool = False
+    API_KEYS: str = ""
+
     # Statistical Methodology Configuration
     ACTIVE_METHODOLOGY_VERSION: str = "APIX-2.0"
     ACTIVE_WEIGHT_VERSION: str = "DGCA_2026_V1"
@@ -98,6 +106,30 @@ class Settings(BaseSettings):
     OPENROUTER_VISION_MODEL: str = ""  # empty -> ranked DEFAULT_FREE_VISION_MODELS
     OPENROUTER_SITE_URL: str = "http://localhost:3000"
     OPENROUTER_SITE_NAME: str = "India Airfare Observatory"
+
+    # Amadeus Self-Service API (licensed GDS partner feed -- no scraping, no
+    # evasion). Free test environment at https://developers.amadeus.com with
+    # self-service keys; production requires an enterprise agreement. When
+    # credentials are absent the AmadeusScraper raises AmadeusCredentialsMissing
+    # and the base scraper degrades to the tagged calibrated fallback.
+    AMADEUS_CLIENT_ID: str = ""
+    AMADEUS_CLIENT_SECRET: str = ""
+    AMADEUS_ENV: str = "test"  # "test" | "production"
+    AMADEUS_BASE_URL: str = ""  # optional manual override
+
+    # Sabre Developer Hub (self-service test account -> Username/Password ->
+    # OAuth2 token -> Flight Shop API). Absent credentials make SabreScraper
+    # raise SabreCredentialsMissing and degrade to the tagged calibrated
+    # fallback, same as Amadeus.
+    SABRE_USERNAME: str = ""
+    SABRE_PASSWORD: str = ""
+    SABRE_ENV: str = "cert"  # "cert" (PLAY test) | "prod"
+    SABRE_TOKEN_URL: str = ""  # optional manual override
+    SABRE_SHOP_URL: str = ""  # optional manual override
+
+    # RapidAPI "Sky Scrapper" (Skyscanner wrapper, free tier). Absent key makes
+    # SkyscannerScraper raise and degrade to the tagged calibrated fallback.
+    RAPIDAPI_KEY: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

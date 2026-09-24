@@ -96,6 +96,14 @@ class DGCAWeightEngine:
         if not volumes:
             raise WeightCalculationError("Volumes dictionary cannot be empty")
 
+        negative = {route: vol for route, vol in volumes.items() if vol < 0}
+        if negative:
+            raise WeightCalculationError(
+                f"Passenger volume cannot be negative: {negative}. A single bad "
+                "figure (e.g. a DGCA source-data entry error) must not be allowed "
+                "to silently flip that route's weight sign in the national index."
+            )
+
         total_volume = sum(volumes.values())
         if total_volume <= 0:
             raise WeightCalculationError(

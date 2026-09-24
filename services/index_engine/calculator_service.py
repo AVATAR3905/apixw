@@ -150,13 +150,18 @@ class DailyIndexCalculatorService:
 
         Each cell is exactly the input to the Jevons geometric mean that feeds
         the national Laspeyres aggregation -- resampling these is the unit of
-        bootstrap uncertainty quantification.
+        bootstrap uncertainty quantification. Uses ``carrier_fares_for_variance``
+        (the outlier-filtered set that actually produced ``representative_price``)
+        rather than the raw ``carrier_fares`` -- otherwise a single MAD/IQR-excluded
+        outlier bid would still get resampled into the published CI even though
+        the point estimate itself never used it, producing a CI that doesn't
+        describe the same estimator it's supposed to annotate.
         """
         samples: Dict[str, List[float]] = {}
         for rcode, est in estimates.items():
             if not est:
                 continue
-            carrier_fares = est.get("carrier_fares") or {}
+            carrier_fares = est.get("carrier_fares_for_variance") or est.get("carrier_fares") or {}
             fares = [float(f) for f in carrier_fares.values()]
             if fares:
                 samples[rcode] = fares

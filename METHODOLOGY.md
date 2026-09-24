@@ -125,22 +125,30 @@ rogue spike. It is used by the feed-cohort correlation layer
 
 ## 3. Route Basket & DGCA Normalization
 
-Corridors are chosen across both high-density trunk routes and regional/thin corridors:
+Corridors are chosen across both high-density trunk routes and regional/thin corridors. Passenger
+volumes below are **real** trailing-12-month (Aug 2025-Jul 2026) DGCA city-pair traffic figures —
+sourced from DGCA's own Monthly Domestic Air Transport Statistics via the public
+[Vonter/india-aviation-traffic](https://github.com/Vonter/india-aviation-traffic) aggregation
+(`data/reference/dgca_traffic.csv`), replacing earlier placeholder numbers:
 
-| Corridor | Corridor Type | Base Representative Fare | DGCA Passenger Volume | Normalized Weight ($w_j$) |
-|---|---|---|---|---|
-| **DEL-BOM** | Metro Trunk | INR 4,115.00 | 3,250,000 | **0.184** (18.4%) |
-| **DEL-BLR** | Metro Trunk | INR 4,450.00 | 2,510,000 | **0.142** (14.2%) |
-| **BOM-BLR** | Metro Trunk | INR 3,380.00 | 2,140,000 | **0.121** (12.1%) |
-| **DEL-CCU** | Metro Trunk | INR 4,320.00 | 1,860,000 | **0.105** (10.5%) |
-| **DEL-HYD** | Metro Trunk | INR 3,750.00 | 1,730,000 | **0.098** (9.8%) |
-| **BOM-MAA** | Metro Trunk | INR 3,420.00 | 1,520,000 | **0.086** (8.6%) |
-| **BLR-HYD** | Metro Trunk | INR 2,850.00 | 1,390,000 | **0.079** (7.9%) |
-| **DEL-MAA** | Metro Trunk | INR 4,680.00 | 1,320,000 | **0.075** (7.5%) |
-| **DEL-IXS** (Silchar) | Regional Thin | INR 6,250.00 | 1,020,000 | **0.058** (5.8%) |
-| **DEL-DHM** (Dharamshala)| Regional Thin | INR 5,800.00 | 920,000 | **0.052** (5.2%) |
+| Corridor | Corridor Type | DGCA Passenger Volume (TTM) | Normalized Weight ($w_j$) |
+|---|---|---|---|
+| **DEL-BOM** | Metro Trunk | 6,778,337 | **0.2376** (23.76%) |
+| **DEL-BLR** | Metro Trunk | 4,877,158 | **0.1710** (17.10%) |
+| **BOM-BLR** | Metro Trunk | 4,129,165 | **0.1448** (14.48%) |
+| **DEL-HYD** | Metro Trunk | 3,105,466 | **0.1089** (10.89%) |
+| **DEL-CCU** | Metro Trunk | 2,912,808 | **0.1021** (10.21%) |
+| **BOM-MAA** | Metro Trunk | 2,219,067 | **0.0778** (7.78%) |
+| **DEL-MAA** | Metro Trunk | 2,184,325 | **0.0766** (7.66%) |
+| **BLR-HYD** | Metro Trunk | 2,169,407 | **0.0761** (7.61%) |
+| **DEL-DHM** (Dharamsala)| Regional Thin | 131,205 | **0.0046** (0.46%) |
+| **DEL-IXS** (Silchar) | Regional Thin | 16,610 | **0.0006** (0.06%) |
 
 $$\sum_{j=1}^{10} w_j = 1.000000 \quad (\pm 10^{-6})$$
+
+Note the regional-thin ordering flips vs. earlier placeholder data: real DGCA traffic shows
+DEL-DHM (Dharamsala) carrying roughly 8x the passenger volume of DEL-IXS (Silchar) over this
+window, so DHM now carries the larger of the two small weights.
 
 ---
 
@@ -148,8 +156,9 @@ $$\sum_{j=1}^{10} w_j = 1.000000 \quad (\pm 10^{-6})$$
 
 - **Directional Accuracy:** Measures month-over-month price movement concordance:
   $$\text{Directional Accuracy} = \frac{1}{N} \sum_{t=1}^N \mathbf{1}(\text{sign}(\Delta \text{Prototype}_t) == \text{sign}(\Delta \text{MoSPI}_t)) \times 100\%$$
-- **Pearson Correlation ($r$):** Evaluates linear co-movement independent of base year scaling differences ($r = 0.997$).
-- **Methodological Disclosure:** High-frequency search quotes measure forward-looking expectations across 5 lead-time windows, whereas MoSPI CPI reflects retrospective survey collection on fixed routes and dates. Co-movement indicates alignment with broader macroeconomic inflation trends.
+- **Pearson Correlation ($r$):** Evaluates linear co-movement independent of base year scaling differences.
+- **Methodological Disclosure:** High-frequency search quotes measure forward-looking expectations across 5 lead-time windows, whereas MoSPI CPI reflects retrospective survey collection on fixed routes and dates. Co-movement indicates alignment with broader macroeconomic inflation trends. MoSPI does not publish a standalone domestic-airfare-only CPI sub-index; the benchmark used is item 07.3 "Passenger transport services" (Combined, 2024=100) -- a composite across rail/air/road fares, not air fare alone.
+- **Current real-data status:** MoSPI's 2024=100 series (`data/reference/mospi_cpi_benchmark.csv`) is transcribed from real Press Release PDFs and currently covers Jan-Jul 2026 (one gap month, May). The prototype's own operating history starts 2026-08-01, so **there is presently no real overlapping month** between the two series -- `GET /api/v1/validation` honestly reports `status=INSUFFICIENT_REAL_OVERLAP` with `is_live_computation=false` and an illustrative reference scorecard (not a live $r$), rather than fabricating a correlation. This will become a genuine computation automatically once both series accumulate 3+ overlapping months (MoSPI publishes with a 5-6 week lag, so August 2026's release is expected in October 2026).
 
 ### 4.1 Governance & Policy Intelligence Definitions (v2.2)
 

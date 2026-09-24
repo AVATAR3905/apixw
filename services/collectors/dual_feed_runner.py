@@ -75,13 +75,20 @@ def run_dual_feed_collection(
         # STEP 1: Scrape Carrier Direct Websites (Priority 1)
         # -------------------------------------------------------------
         print(
-            "\n[Feed 1: Primary] Querying Carrier Direct Booking Systems (IndiGo, SpiceJet, Akasa)..."
+            "\n[Feed 1: Primary] Querying Carrier Direct Booking Systems (SpiceJet, Akasa)..."
         )
         direct_scraper = CarrierDirectScraper()
         carrier_quotes: List[Dict[str, Any]] = []
 
-        # Query top domestic carriers operating on corridor
-        for c_code in ["6E", "SG", "QP"]:
+        # IndiGo (6E) is not queried here: confirmed IP/fingerprint-blocked
+        # (goindigo.in returns a generic error page even from a vanilla
+        # Playwright context), so it never contributes a real quote -- every
+        # attempt is pure wasted time, and the browser-pool timeout -> dedicated
+        # launch fallback for a persistently unreachable site has no bounded
+        # timeout of its own, so it can hang a bulk run indefinitely instead of
+        # just failing fast. Only the two verified-working carrier-direct
+        # sources are queried.
+        for c_code in ["SG", "QP"]:
             print(f"      -> Querying {carrier_display_name(c_code)} booking portal...")
             c_res = direct_scraper.scrape_carrier_corridor(
                 carrier_code=c_code,
