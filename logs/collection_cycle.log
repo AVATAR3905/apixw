@@ -1,7 +1,0 @@
----- 24-09-2026 18:53:50.80 ----  
-Traceback (most recent call last):
-  File "C:\Users\cecilia\Downloads\APIx-main\APIx-main\scripts\collect_full_real_coverage.py", line 20, in <module>
-    from database.session import SessionLocal  # noqa: E402
-  File "C:\Users\cecilia\Downloads\APIx-main\APIx-main\database\session.py", line 5, in <module>
-    from sqlalchemy import create_engine, text
-ModuleNotFoundError: No module named 'sqlalchemy'

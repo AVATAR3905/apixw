@@ -63,3 +63,9 @@ pgdata/
 # Internal Diagrams & Scraped Raw Payloads
 *.mermaid
 data/raw/
+
+# Local operational logs (scheduled task output) -- these get written to
+# constantly on the local machine and must never sit in the tracked working
+# tree, or the sync-from-github script's "is anything dirty?" safety check
+# would permanently block itself the moment it writes its own log line.
+logs/
