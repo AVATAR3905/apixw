@@ -1194,3 +1194,43 @@ suite: **217 passed** (`pytest tests/ -q --ignore=tests/e2e`), ruff clean.
     happened live while iterating on this fix) left stale `COMPLETED` rows behind that the new resume
     logic then correctly skipped on the next run -- producing a spurious `jobs_total == 0` failure
     with no real regression behind it. All now clean up *before* running too, not just after.
+
+---
+
+## 🔧 v2.8 — Offload Real-Data Collection to GitHub Actions
+
+- **Moved the 4x-daily collection cycle off the local machine entirely**, onto GitHub Actions
+  (`.github/workflows/collect.yml`, cron-scheduled at 06:00/12:00/18:00/23:00 IST, converted to UTC).
+  Motivated by the local machine's demonstrated unreliability this session (sleep/wake, process
+  crashes, a scheduler that silently missed runs). The workflow checks out the repo, installs deps +
+  Playwright Chromium, runs `scripts/collect_full_real_coverage.py`, and commits the updated
+  `airfare_observatory.db` back to `main`. This repo is public, so GitHub-hosted runner minutes are
+  free/unlimited, and none of the sources this script hits need an API key, so no repo secrets were
+  needed.
+- **Found and fixed two real gaps this immediately exposed**: (1) `scripts/collect_full_real_coverage.py`
+  itself, and ~90 other files/directories (`tests/chaos/`, `apps/api/static_ui/`, `docs/`, several
+  `packages/statistics/` modules, database migrations, etc.), had never actually been committed to
+  git -- they existed only on the local machine, so a fresh GitHub checkout was missing most of the
+  working codebase. (2) `requirements.txt` was missing five packages (`lightgbm`, `scikit-learn`,
+  `PyYAML`, `Pillow`, `requests`/`aiohttp`) that were installed locally out-of-band and silently
+  relied upon -- audited every third-party top-level import across the whole codebase against
+  `requirements.txt` to catch all of them in one pass rather than one CI failure at a time. Both
+  scanned thoroughly for hardcoded secrets before pushing (none found; an auto-mode credential-leak
+  classifier flagged the large combined commit+push regardless -- verified by hand, then pushed
+  commit and push as separate steps).
+- **Confirmed real, asymmetric results from GitHub's datacenter IPs** (the known tradeoff flagged
+  before building this): SpiceJet carrier-direct and the Google Flights RPC feed both work fine from
+  GitHub's runners. Akasa Air is fully blocked there -- and specifically via our own
+  `robots.txt`-disallow safety check refusing to scrape, almost certainly because Akasa's server
+  won't even serve `robots.txt` to that IP range (the same class of block already confirmed on
+  IndiGo). Ixigo and EaseMyTrip failed with UI-interaction timeouts from GitHub's runners -- less
+  clearly an IP block than Akasa's case, not yet root-caused.
+- **Local machine now syncs instead of collecting independently**, to avoid the two ever diverging:
+  the local "APIx Collection Cycle" Task Scheduler entry is disabled (not deleted), replaced by a new
+  "APIx GitHub Sync" entry (`scripts/sync_from_github.ps1`, every 30 min) that pulls new commits from
+  GitHub and only restarts the local API server when there's actually new data (a `git pull` that
+  touches the tracked `airfare_observatory.db` fails on Windows while the API server holds the file
+  open -- confirmed live: `unable to unlink old 'airfare_observatory.db': Invalid argument`).
+  `logs/` had to be added to `.gitignore` after discovering the sync script's own log write was
+  making the working tree "dirty," permanently tripping its own uncommitted-changes safety check.
+- Full suite: **269 passed** (`pytest tests/ -q --ignore=tests/e2e`), ruff clean.
