@@ -36,23 +36,48 @@ export default function MoSPIValidationPage() {
     pearson_correlation_r: 0.997,
     mean_absolute_error: 0.87,
   });
+  const [validationStatus, setValidationStatus] = useState<{
+    status: string;
+    isLiveComputation: boolean;
+    methodologyStatus: string;
+    note: string;
+    overlappingPeriodsCount: number;
+  } | null>(null);
 
   useEffect(() => {
     async function loadScorecard() {
       const data = await fetchFromApi<any>("/validation", null);
       if (data && data.comparative_series) {
+        let prevDelta: number | null = null;
         setComparisonSeries(
-          data.comparative_series.map((s: any) => ({
-            period: s.period,
-            proto: s.prototype_monthly_index,
-            mospi: s.mospi_cpi_airfare,
-            spread: Math.round(Math.abs(s.prototype_monthly_index - s.mospi_cpi_airfare) * 10) / 10,
-            dirMatch: true,
-          }))
+          data.comparative_series.map((s: any) => {
+            const delta = s.prototype_monthly_index - s.mospi_cpi_airfare;
+            // Directional match compares month-over-month sign, so it needs
+            // the previous month's delta -- the first row has no prior
+            // month to compare against.
+            const dirMatch = prevDelta === null ? true : Math.sign(delta) === Math.sign(prevDelta);
+            prevDelta = delta;
+            return {
+              period: s.period,
+              proto: s.prototype_monthly_index,
+              mospi: s.mospi_cpi_airfare,
+              spread: Math.round(Math.abs(delta) * 10) / 10,
+              dirMatch,
+            };
+          })
         );
       }
       if (data && data.metrics) {
         setMetrics(data.metrics);
+      }
+      if (data) {
+        setValidationStatus({
+          status: data.status || "UNKNOWN",
+          isLiveComputation: !!data.is_live_computation,
+          methodologyStatus: data.methodology_status || "",
+          note: data.note || "",
+          overlappingPeriodsCount: data.overlapping_periods_count ?? 0,
+        });
       }
     }
     loadScorecard();
@@ -70,11 +95,35 @@ export default function MoSPIValidationPage() {
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 text-xs font-mono text-ink bg-canvas px-3 py-1.5 rounded-[18px] border border-hairline">
               <ShieldCheck className="h-4 w-4 text-ink" />
-              <span className="font-semibold">STATISTICALLY DEFENDED</span>
+              <span className="font-semibold">
+                {validationStatus && !validationStatus.isLiveComputation
+                  ? "ILLUSTRATIVE REFERENCE ONLY"
+                  : "STATISTICALLY DEFENDED"}
+              </span>
             </div>
           </div>
         }
       />
+
+      {/* Honest data-provenance banner -- the backend explicitly flags when
+          there isn't yet enough real MoSPI overlap to compute this live;
+          the UI must surface that, not silently present placeholder numbers
+          as a live result. */}
+      {validationStatus && !validationStatus.isLiveComputation && (
+        <div className="rounded-cards border border-hairline bg-surface-alt p-5 flex items-start gap-3.5 text-xs">
+          <AlertCircle className="h-5 w-5 text-ink shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="font-bold text-ink text-xs uppercase font-mono tracking-wider">
+              Not Yet a Live Computation ({validationStatus.overlappingPeriodsCount} real overlapping month
+              {validationStatus.overlappingPeriodsCount === 1 ? "" : "s"} so far)
+            </h4>
+            <p className="leading-relaxed text-mid-gray">
+              {validationStatus.note ||
+                "Fewer than 3 real overlapping months exist yet between this platform's operating history and MoSPI's published series. The numbers below show the intended output shape once enough real overlap accumulates -- they are not a live-computed correlation."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Narrative Alignment Banner */}
       <div className="rounded-cards border border-hairline bg-paper p-6 sm:p-7 shadow-subtle">
@@ -139,7 +188,7 @@ export default function MoSPIValidationPage() {
         />
         <StatCard
           title="Tracking Spread (MAE)"
-          value="3.42 pts"
+          value={`${metrics.mean_absolute_error.toFixed(2)} pts`}
           subtitle="Expected level-shift differential"
           accent="default"
           icon={Scale}
@@ -224,8 +273,8 @@ export default function MoSPIValidationPage() {
                   <td className="px-6 py-4 font-mono font-bold text-mid-gray text-sm">{row.mospi.toFixed(1)}</td>
                   <td className="px-6 py-4 font-mono text-mid-gray">+{row.spread.toFixed(1)} pts</td>
                   <td className="px-6 py-4 text-right">
-                    <Badge variant="soft" size="xs">
-                      CO-MOVING (MATCH)
+                    <Badge variant={row.dirMatch ? "soft" : "danger"} size="xs">
+                      {row.dirMatch ? "CO-MOVING (MATCH)" : "DIVERGENT"}
                     </Badge>
                   </td>
                 </tr>

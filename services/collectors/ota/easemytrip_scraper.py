@@ -14,11 +14,13 @@ import logging
 import re
 from typing import Any, Dict, List
 
+from packages.shared.config import settings
 from services.collectors.ota.base_ota_scraper import BaseOTAScraper
 from services.collectors.ota.card_extraction import (
     extract_cards_from_dom,
     extract_cards_from_screenshot,
 )
+from services.collectors.ota.registry import register_ota_scraper
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +38,7 @@ _CARRIER_CODES = {
 }
 
 
+@register_ota_scraper("EaseMyTrip")
 class EaseMyTripScraper(BaseOTAScraper):
     """Scrapes EaseMyTrip domestic flight quotes. Highlights Zero Convenience Fee baseline."""
 
@@ -80,7 +83,7 @@ class EaseMyTripScraper(BaseOTAScraper):
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
-                headless=True, args=["--disable-blink-features=AutomationControlled"]
+                headless=settings.BROWSE_HEADLESS, args=["--disable-blink-features=AutomationControlled"]
             )
             try:
                 context = browser.new_context(

@@ -53,10 +53,10 @@ export default function RouteMatrixPage() {
             d1: `${c.daily_change_pct != null && c.daily_change_pct >= 0 ? "+" : ""}${c.daily_change_pct?.toFixed(1) || "0.0"}%`,
             d7: `${c.weekly_change_pct != null && c.weekly_change_pct >= 0 ? "+" : ""}${c.weekly_change_pct?.toFixed(1) || "1.2"}%`,
             d30: `${c.monthly_change_pct != null && c.monthly_change_pct >= 0 ? "+" : ""}${c.monthly_change_pct?.toFixed(1) || "4.5"}%`,
-            fare: "₹3,000+",
+            fare: c.representative_price ? `₹${Math.round(c.representative_price).toLocaleString()}` : "No data yet",
             status: c.corridor_type === "REGIONAL_THIN" ? "VOLATILE" : "NORMAL",
-            carriers: "6E, AI, SG, QP",
-            flights: 24,
+            carriers: c.carriers && c.carriers.length > 0 ? c.carriers.join(", ") : "No data yet",
+            flights: c.flight_count || 0,
           }))
         );
       }
@@ -64,7 +64,10 @@ export default function RouteMatrixPage() {
     loadCorridors();
   }, []);
 
-  const filtered = corridors.filter((c) => filterType === "ALL" || c.type === filterType);
+  const filtered = corridors
+    .filter((c) => filterType === "ALL" || c.type === filterType)
+    .slice()
+    .sort((a, b) => parseFloat(b.d7) - parseFloat(a.d7));
 
   return (
     <div className="space-y-8">

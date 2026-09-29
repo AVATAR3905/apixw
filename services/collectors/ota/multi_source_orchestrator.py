@@ -14,14 +14,22 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from services.collectors.carrier_direct_scraper import CarrierDirectScraper
+
+# Importing these registers every built-in OTA scraper (see
+# services/collectors/ota/registry.py) so collect_corridor_all_sources below
+# can ask the registry which sources are actually approved+enabled, instead
+# of hard-coding the list here (PRD US-014).
+from services.collectors.ota import (  # noqa: F401
+    cleartrip_scraper,
+    easemytrip_scraper,
+    ixigo_scraper,
+    makemytrip_scraper,
+    skyscanner_scraper,
+    yatra_scraper,
+)
 from services.collectors.ota.amadeus_scraper import AmadeusScraper
-from services.collectors.ota.cleartrip_scraper import CleartripScraper
-from services.collectors.ota.easemytrip_scraper import EaseMyTripScraper
-from services.collectors.ota.ixigo_scraper import IxigoScraper
-from services.collectors.ota.makemytrip_scraper import MakeMyTripScraper
+from services.collectors.ota.registry import get_approved_ota_scrapers
 from services.collectors.ota.sabre_scraper import SabreScraper
-from services.collectors.ota.skyscanner_scraper import SkyscannerScraper
-from services.collectors.ota.yatra_scraper import YatraScraper
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +39,6 @@ class MultiSourceFlightOrchestrator:
 
     def __init__(self):
         self.carrier_scraper = CarrierDirectScraper()
-        self.ota_scrapers = [
-            MakeMyTripScraper(),
-            IxigoScraper(),
-            EaseMyTripScraper(),
-            YatraScraper(),
-            CleartripScraper(),
-            SkyscannerScraper(),
-        ]
         # Licensed GDS / partner-API feeds (never scraped; no evasion tooling).
         self.partner_scrapers = [AmadeusScraper(), SabreScraper()]
 
@@ -98,8 +98,9 @@ class MultiSourceFlightOrchestrator:
         # NOTE: No common-schedule or fare-decomposition fabrication is injected here.
         # Cross-flight comparability relies on real flight-number overlap across platforms.
 
-        # 2. Scrape All 6 OTAs
-        for ota in self.ota_scrapers:
+        # 2. Scrape every OTA currently approved+enabled in the source
+        # registry (PRD §4.4/§12 -- compliance gate, not a hard-coded list).
+        for ota in get_approved_ota_scrapers(db) if db else []:
             logger.info(f"Collecting from {ota.source_name} for {route_code}...")
             try:
                 o_res = ota.scrape_corridor(

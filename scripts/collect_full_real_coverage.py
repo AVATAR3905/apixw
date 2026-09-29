@@ -5,6 +5,7 @@ EaseMyTrip OTA scrapers). Delegates to CollectionScheduler.trigger_collection_cy
 so a manual run and the automated 4x-daily cron share identical logic.
 """
 
+import argparse
 import datetime
 import logging
 import os
@@ -22,7 +23,17 @@ from services.scheduler.collection_scheduler import CollectionScheduler  # noqa:
 
 
 def main():
-    search_date = datetime.date.today()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--date",
+        type=lambda s: datetime.date.fromisoformat(s),
+        default=None,
+        help="Search date (YYYY-MM-DD) to collect for. Defaults to today. "
+             "Pinning this lets a retry loop keep targeting the same basket "
+             "across a midnight rollover instead of silently starting a new one.",
+    )
+    args = parser.parse_args()
+    search_date = args.date or datetime.date.today()
     print(f"\n[*] Starting full-basket real-data collection for {search_date} "
           f"(10 routes x 5 horizons = 50 corridor-jobs, each hitting SpiceJet, "
           f"Akasa, Google Flights RPC, Ixigo, EaseMyTrip)...\n")

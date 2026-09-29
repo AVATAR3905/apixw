@@ -39,6 +39,13 @@ class SourceRegistryService:
         "DISABLED": ["REVIEW_REQUIRED", "APPROVED"],
     }
 
+    # Acceptable `license_status` values for a CONDITIONAL-access source.
+    # AGGREGATOR_RESEARCH is the category used for the 6 seeded OTA/metasearch
+    # sources (MakeMyTrip, Ixigo, EaseMyTrip, Yatra, Cleartrip, Skyscanner) --
+    # keep this list and the seed data in sync; a source with any other
+    # license_status stays blocked even if APPROVED+enabled.
+    CONDITIONAL_LICENSES = ("RESEARCH_EXEMPTION", "LIMITED_USE", "VERIFIED_PERMITTED", "AGGREGATOR_RESEARCH")
+
     @classmethod
     def can_collect(cls, source: Source) -> bool:
         """
@@ -60,7 +67,7 @@ class SourceRegistryService:
         access_mode = (source.access_mode or "PUBLIC").upper()
         license_status = (source.license_status or "").upper()
         if access_mode == "CONDITIONAL":
-            return license_status in ("RESEARCH_EXEMPTION", "LIMITED_USE", "VERIFIED_PERMITTED")
+            return license_status in cls.CONDITIONAL_LICENSES
         if access_mode == "PARTNER_ONLY":
             return license_status == "PARTNER_AGREEMENT"
         return True
@@ -76,11 +83,7 @@ class SourceRegistryService:
             return f"health_status is {source.health_status!r}"
         access_mode = (source.access_mode or "PUBLIC").upper()
         license_status = (source.license_status or "").upper()
-        if access_mode == "CONDITIONAL" and license_status not in (
-            "RESEARCH_EXEMPTION",
-            "LIMITED_USE",
-            "VERIFIED_PERMITTED",
-        ):
+        if access_mode == "CONDITIONAL" and license_status not in cls.CONDITIONAL_LICENSES:
             return (
                 "access_mode CONDITIONAL requires a limited-use/research license, "
                 f"got {license_status!r}"

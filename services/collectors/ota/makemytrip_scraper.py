@@ -4,8 +4,10 @@ import datetime
 from typing import Any, Dict, List
 
 from services.collectors.ota.base_ota_scraper import BaseOTAScraper
+from services.collectors.ota.registry import register_ota_scraper
 
 
+@register_ota_scraper("MakeMyTrip India")
 class MakeMyTripScraper(BaseOTAScraper):
     """Scrapes MakeMyTrip domestic flight results with full fee decomposition."""
 

@@ -59,6 +59,8 @@ export interface CorridorItem {
   weekly_change_pct: number | null;
   monthly_change_pct: number | null;
   representative_price: number | null;
+  carriers: string[];
+  flight_count: number;
 }
 
 export interface RouteDetailResponse {

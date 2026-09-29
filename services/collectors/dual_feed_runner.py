@@ -112,13 +112,23 @@ def run_dual_feed_collection(
         # -------------------------------------------------------------
         print("\n[Feed 2: Validator & Fallback] Querying Google Flights Real-Time RPC Feed...")
         rpc_connector = RealFlightRPCConnector()
-        rpc_quotes = rpc_connector.search_corridor_horizon(
-            origin_airport=origin,
-            destination_airport=dest,
-            advance_days=advance_days,
-            search_date=search_date,
-            db=db,
-        )
+        try:
+            rpc_quotes = rpc_connector.search_corridor_horizon(
+                origin_airport=origin,
+                destination_airport=dest,
+                advance_days=advance_days,
+                search_date=search_date,
+                db=db,
+            )
+        except Exception as e:
+            # This feed is a validator/fallback, not the primary source --
+            # a parsing or availability failure here (e.g. the upstream
+            # fast_flights library indexing into an empty result set for a
+            # route/date it has no data for) should degrade to "no aggregator
+            # quotes this run", not discard the carrier-direct quotes already
+            # collected above.
+            print(f"      -> RPC feed unavailable, continuing with carrier-direct only ({e})")
+            rpc_quotes = []
         print(f"      -> Collected {len(rpc_quotes)} live aggregator quotes for cross-validation.")
 
         # -------------------------------------------------------------

@@ -11,8 +11,19 @@ from packages.schemas.models import CollectionJob, Route, Source
 from packages.shared.time_utils import utcnow
 from services.collectors.base import BaseConnector
 from services.collectors.live_connector import LiveFlightConnector
-from services.collectors.ota.easemytrip_scraper import EaseMyTripScraper
-from services.collectors.ota.ixigo_scraper import IxigoScraper
+
+# Importing these registers every built-in OTA scraper (see
+# services/collectors/ota/registry.py) before the loop below asks the
+# registry which sources are actually approved+enabled to run.
+from services.collectors.ota import (  # noqa: F401
+    cleartrip_scraper,
+    easemytrip_scraper,
+    ixigo_scraper,
+    makemytrip_scraper,
+    skyscanner_scraper,
+    yatra_scraper,
+)
+from services.collectors.ota.registry import get_approved_ota_scrapers
 from services.collectors.real_fare_normalizer import RealFareNormalizer
 
 
@@ -160,14 +171,16 @@ class CollectionScheduler:
                             job.error_message = f"{e} | {inner_e}"
                             jobs_failed += 1
 
-                    # Real OTA collection (Ixigo, EaseMyTrip -- the two OTAs with
-                    # a verified working live scrape path; the other four remain
-                    # network/anti-bot blocked and are not attempted here).
+                    # OTA collection: every scraper registered in
+                    # services/collectors/ota/registry.py whose `sources` row
+                    # is currently approved+enabled (see PRD US-014 -- adding
+                    # a new permitted OTA means registering its scraper class
+                    # and approving its DB row, not editing this loop).
                     # Production-only: gated the same way as the dual-feed call
                     # above (skipped when a test passes an explicit connector),
                     # so the test suite stays hermetic -- no real Playwright
                     # browser launches during `trigger_collection_cycle` tests.
-                    for ota in (IxigoScraper(), EaseMyTripScraper()):
+                    for ota in get_approved_ota_scrapers(db):
                         try:
                             ota_quotes = ota.scrape_corridor(
                                 origin_airport=route.route_code.split("-")[0],

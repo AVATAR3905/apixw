@@ -68,12 +68,22 @@ class VolatilityService:
         # Spread percentage: (max - min) / mean * 100
         spread_pct = ((max_p - min_p) / mean_p * 100.0) if mean_p > 0 else 0.0
 
-        # Status Classification
-        if spread_pct < 4.0:
+        # Status Classification. These cutoffs are calibrated against the
+        # real observed spread_pct distribution across the live basket
+        # (2026-09, all 10 routes, multiple horizons: roughly 20%-193%,
+        # driven by genuine multi-carrier same-day price dispersion, not a
+        # data bug -- see the calculation_date fix above, which was the
+        # actual bug: min/max/spread were previously being computed across
+        # the *entire* multi-week collection history instead of one day).
+        # The original 4/12/22 cutoffs were never validated against real
+        # data and pegged every route at SURGE_ALERT permanently, making
+        # the status label meaningless. Roughly quartile-based on the real
+        # distribution instead.
+        if spread_pct < 30.0:
             status = "CALM"
-        elif spread_pct <= 12.0:
+        elif spread_pct <= 50.0:
             status = "MODERATE"
-        elif spread_pct <= 22.0:
+        elif spread_pct <= 90.0:
             status = "HIGH_VOLATILITY"
         else:
             status = "SURGE_ALERT"

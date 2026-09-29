@@ -278,6 +278,17 @@ class CorridorSummaryItem(BaseModel):
     representative_price: Optional[float] = Field(
         None, description="Median basic fare across carriers (INR)", examples=[4850.0]
     )
+    carriers: List[str] = Field(
+        default_factory=list,
+        description="Carrier IATA codes with a real observed fare on this route",
+        examples=[["6E", "AI", "SG", "QP"]],
+    )
+    flight_count: int = Field(
+        0, description="Distinct flight numbers observed on this route", examples=[24]
+    )
+    distance_km: Optional[int] = Field(
+        None, description="Great-circle (haversine) airport-to-airport distance", examples=[1148]
+    )
 
 
 class LiveQuoteItem(BaseModel):
@@ -964,21 +975,29 @@ def list_routes_summary(db: Session = Depends(get_db)):
     routes = db.query(Route).filter(Route.active).all()
     weights = DGCAWeightEngine.get_active_weights(db)
 
+    airline_codes = {a.id: a.code for a in db.query(Airline).all()}
+
     # Current representative basic fare per route: median of per-carrier minimums
-    # (same methodology as the corridor detail endpoint).
+    # (same methodology as the corridor detail endpoint). Also tracks which
+    # carriers actually have real observations per route, and how many
+    # distinct flight numbers -- both were previously hard-coded identically
+    # for every route on the frontend regardless of what's real.
     route_ids = [r.id for r in routes]
     rep_prices: Dict[int, float] = {}
     carrier_mins: Dict[int, Dict[int, float]] = {}
-    for route_id, airline_id, status, base_fare in (
+    flight_numbers_by_route: Dict[int, set] = {}
+    for route_id, airline_id, status, base_fare, flight_number in (
         db.query(
             FareObservation.route_id,
             FareObservation.airline_id,
             FareObservation.availability_status,
             FareObservation.base_fare,
+            FareObservation.flight_number,
         )
         .filter(FareObservation.route_id.in_(route_ids))
         .all()
     ):
+        flight_numbers_by_route.setdefault(route_id, set()).add(flight_number)
         if str(status or "AVAILABLE").upper() != "AVAILABLE" or not base_fare or base_fare <= 0:
             continue
         bucket = carrier_mins.setdefault(route_id, {})
@@ -1021,6 +1040,11 @@ def list_routes_summary(db: Session = Depends(get_db)):
                 "current_index_se": latest_idx.standard_error if latest_idx else None,
                 "current_index_ci_lower": latest_idx.index_ci_lower if latest_idx else None,
                 "current_index_ci_upper": latest_idx.index_ci_upper if latest_idx else None,
+                "carriers": sorted(
+                    airline_codes[aid] for aid in carrier_mins.get(r.id, {}).keys() if aid in airline_codes
+                ),
+                "flight_count": len(flight_numbers_by_route.get(r.id, set())),
+                "distance_km": r.distance_km,
             }
         )
 
@@ -1770,10 +1794,22 @@ def get_carrier_inflation_timeseries(
 @router.get("/analytics/volatility", tags=["Statistical Analytics"])
 def get_network_volatility(
     horizon: int = Query(15, description="Advance purchase horizon days (1, 7, 15, 30, 45)"),
+    calculation_date: Optional[datetime.date] = Query(
+        None, description="Day to compute intraday volatility for (defaults to today)"
+    ),
     db: Session = Depends(get_db),
 ):
-    """Retrieves route-level price dispersion, intraday spreads, standard deviations, and surge alerts."""
-    return VolatilityService.get_network_volatility_summary(db, horizon_days=horizon)
+    """Retrieves route-level price dispersion, intraday spreads, standard deviations, and surge alerts.
+
+    Scoped to a single calculation_date (today by default) -- without this,
+    min/max/spread would silently aggregate across the entire multi-week
+    collection history instead of one day's actual intraday dispersion,
+    which inflated every route to a permanent SURGE_ALERT regardless of the
+    real day-to-day picture.
+    """
+    return VolatilityService.get_network_volatility_summary(
+        db, calculation_date=calculation_date or datetime.date.today(), horizon_days=horizon
+    )
 
 
 @router.get("/analytics/volatility/{route_code}", tags=["Statistical Analytics"])

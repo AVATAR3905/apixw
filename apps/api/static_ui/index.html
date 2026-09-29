@@ -204,9 +204,6 @@
               <select id="ovFrequency" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold outline-none">
                 <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly" selected>Monthly</option>
               </select>
-              <select id="ovMethod" class="rounded-full border border-black/10 bg-white/60 px-4 py-2 text-xs font-semibold outline-none">
-                <option value="median" selected>Median</option><option value="min">Min</option>
-              </select>
             </div>
           </div>
           <div class="chart-box mt-5"><canvas id="overviewChart"></canvas></div>
@@ -394,24 +391,22 @@
 
   async function overview(){
     let data;
-    try { data=await api('/index/headline?'+params({frequency:$('#ovFrequency').value,aggregation_method:$('#ovMethod').value})); clearError(); }
-    catch(e){ data=fakeSeries(); }
-    const points=data.points||[];
-    if(!points.length) return;
-    const last=points[points.length-1];
-    $('#statIndex').textContent=Number(last.index_value).toFixed(1);
-    $('#heroIndex').textContent=Number(last.index_value).toFixed(1);
-    $('#heroDate').textContent=last.index_date||'';
-    $('#overviewHeadline').textContent=`Latest ${$('#ovFrequency').value} ${$('#ovMethod').value} index · ${last.index_date}`;
-    let corePoints=[];
-    try {
-      const core=await api('/index/headline?'+params({frequency:$('#ovFrequency').value,aggregation_method:$('#ovMethod').value,series_type:'CORE'}));
-      corePoints=(core.points||[]).map(p=>({date:p.index_date,value:Number(p.index_value)}));
-    } catch(e){}
-    const coreSet=new Map(corePoints.map(p=>[p.date,p.value]));
-    chart('overviewChart',points.map(p=>p.index_date),[
-      ds('Headline index',points.map(p=>Number(p.index_value)),{backgroundColor:'rgba(183,110,61,.14)'}),
-      ds('Core index',points.map(p=>coreSet.has(p.index_date)?coreSet.get(p.index_date):null),{borderColor:'#11110f',pointBackgroundColor:'#11110f',backgroundColor:'transparent',fill:false})
+    // /index/headline never existed on this API (it 404'd, silently falling
+    // back to fakeSeries() every time -- this whole chart was fake data).
+    // /index/dual-series is the real endpoint and returns headline+core
+    // together in one call, so there's no separate Core fetch to fail either.
+    try { data=await api('/index/dual-series?'+params({frequency:$('#ovFrequency').value})); clearError(); }
+    catch(e){ data={rows:fakeSeries().points.map(p=>({date:p.index_date,headline:p.index_value,core:null}))}; }
+    const rows=data.rows||[];
+    if(!rows.length) return;
+    const last=rows[rows.length-1];
+    $('#statIndex').textContent=Number(last.headline).toFixed(1);
+    $('#heroIndex').textContent=Number(last.headline).toFixed(1);
+    $('#heroDate').textContent=last.date||'';
+    $('#overviewHeadline').textContent=`Latest ${$('#ovFrequency').value} index · ${last.date}`;
+    chart('overviewChart',rows.map(r=>r.date),[
+      ds('Headline index',rows.map(r=>Number(r.headline)),{backgroundColor:'rgba(183,110,61,.14)'}),
+      ds('Core index',rows.map(r=>r.core!=null?Number(r.core):null),{borderColor:'#11110f',pointBackgroundColor:'#11110f',backgroundColor:'transparent',fill:false})
     ]);
     try {
       const h=await api('/health');
@@ -429,8 +424,8 @@
   }
   async function renderRoutes(){
     let data; try{data=await api('/routes');}catch{data=routes;}
-    table($('#routesTable'),['Origin','Destination','Distance','DGCA weight','Proxy','Status'],
-      data.map(r=>[`<b>${r.origin_iata}</b>`,`<b>${r.destination_iata}</b>`,r.distance_km?`${Number(r.distance_km).toLocaleString()} km`:'—',r.dgca_traffic_weight??'—',r.is_proxy_weight?'Yes':'No',r.is_active?'<span class="rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">Active</span>':'Inactive']));
+    table($('#routesTable'),['Origin','Destination','Distance','DGCA weight','Carriers','Flights'],
+      data.map(r=>[`<b>${r.origin_airport||r.origin_iata}</b>`,`<b>${r.destination_airport||r.destination_iata}</b>`,r.distance_km?`${Number(r.distance_km).toLocaleString()} km`:'—',r.dgca_weight!=null?`${(r.dgca_weight*100).toFixed(1)}%`:(r.dgca_traffic_weight??'—'),(r.carriers&&r.carriers.length?r.carriers.join(', '):'—'),r.flight_count??'—']));
   }
   async function routeIndex(){
     let data; try{data=await api('/index?'+params({route:$('#riRoute').value,frequency:$('#riFrequency').value,advance_purchase_days:$('#riApd').value,aggregation_method:$('#riMethod').value}));}
@@ -499,7 +494,7 @@
     $('#modeDemo').onclick=()=>setMode('http://127.0.0.1:8001');
     $$('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
     $('#mobileMenu').onclick=()=>$('#mobileNav').classList.toggle('hidden');
-    ['ovFrequency','ovMethod'].forEach(id=>$('#'+id).onchange=overview);
+    $('#ovFrequency').onchange=overview;
     ['riRoute','riFrequency','riApd','riMethod'].forEach(id=>$('#'+id).onchange=routeIndex);
     $('#hmRender').onclick=heatmap;
     $('#elRoute').onchange=elasticity;

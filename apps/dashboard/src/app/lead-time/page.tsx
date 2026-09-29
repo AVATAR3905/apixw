@@ -72,6 +72,18 @@ export default function LeadTimeElasticityPage() {
 
   const activeRoute = routes.find((r) => r.code === selectedRoute) || { code: selectedRoute, name: selectedRoute };
 
+  const carrierNames: Record<string, string> = {
+    "6E": "IndiGo",
+    AI: "Air India",
+    SG: "SpiceJet",
+    QP: "Akasa Air",
+    IX: "AI Express",
+  };
+
+  const carrierEscalations = (leadTimeData.carrier_escalations || [])
+    .slice()
+    .sort((a, b) => b.surge_multiplier - a.surge_multiplier);
+
   const inventoryMap: Record<string, string> = {
     "T+45": ">80% Capacity Open",
     "T+30": "~65% Capacity Open",
@@ -241,6 +253,41 @@ export default function LeadTimeElasticityPage() {
           </div>
         ))}
       </div>
+
+      {/* Per-Carrier Escalation Breakdown */}
+      {carrierEscalations.length > 0 && (
+        <div className="rounded-cards border border-hairline bg-paper p-6 sm:p-7 shadow-subtle space-y-5">
+          <div>
+            <h2 className="text-lg font-bold text-ink font-sans">
+              Per-Carrier Surge Multiplier (T+1 vs T+45)
+            </h2>
+            <p className="text-xs text-mid-gray">
+              Which carriers on {activeRoute.code} raise prices most aggressively as departure approaches.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {carrierEscalations.map((ce) => (
+              <div
+                key={ce.carrier}
+                className="rounded-cards border border-hairline bg-paper p-4 shadow-subtle"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs font-bold text-ink">{ce.carrier}</span>
+                  {ce === carrierEscalations[0] && (
+                    <Badge variant="danger" size="xs">MOST AGGRESSIVE</Badge>
+                  )}
+                </div>
+                <div className="mt-2 text-xl font-bold text-ink font-sans">
+                  {ce.surge_multiplier.toFixed(2)}x
+                </div>
+                <div className="text-xs font-medium text-mid-gray">
+                  {carrierNames[ce.carrier] || ce.carrier}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Unpooled Lead-Time Rationale Card */}
       <div className="rounded-cards border border-hairline bg-surface-alt p-5 flex items-start gap-3.5 text-xs text-mid-gray">

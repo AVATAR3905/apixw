@@ -220,7 +220,11 @@ def test_token_fetch_uses_basic_auth_and_caches(monkeypatch):
     assert scraper._get_access_token() == "atk-1"
     assert captured["url"].endswith("/v2/auth/token")
     assert captured["data"]["grant_type"] == "client_credentials"
-    expected_basic = base64.b64encode(b"demo_user:demo_pass").decode("ascii")
+    # Sabre's documented double-encoding for the classic credential shape:
+    # base64 the id and secret separately, then base64 the concatenation.
+    encoded_id = base64.b64encode(b"demo_user").decode("ascii")
+    encoded_secret = base64.b64encode(b"demo_pass").decode("ascii")
+    expected_basic = base64.b64encode(f"{encoded_id}:{encoded_secret}".encode("ascii")).decode("ascii")
     assert captured["headers"]["Authorization"] == f"Basic {expected_basic}"
 
 

@@ -10,12 +10,16 @@ carriers with genuine GDS fare/schedule data.
 
 Data flow (no scraping happens anywhere):
     1. OAuth2 token   POST {base}/v2/auth/token
-         Authorization: Basic base64(username:password)
-         body: grant_type=client_credentials (& client_id/client_secret)
+         Authorization: Basic base64(base64(client_id):base64(client_secret))
+         (Sabre's documented "Convert Access Token Credentials" double-encoding
+         for the classic V1:userId:PCC:domain credential shape -- a single
+         base64(user:pass), the generic OAuth2 pattern, gets a 401
+         invalid_client from Sabre for this credential shape.)
+         body: grant_type=client_credentials
     2. Flight Shop    POST {base}/v1/offers/flightShop
          Authorization: Bearer <access_token>
-         JSON body: SearchCriteria (Leg From/To/Date, PTC=ADT,
-                    CabinPreferences=ECONOMY, CurrencyCode=INR)
+         JSON body: journeys[] (departureLocation/arrivalLocation airportCode,
+                    departureDate), travelers[] (passengerTypeCode)
 
 Environments:
     cert (PLAY test)  https://api-crt.cert.havail.sabre.com
@@ -31,16 +35,24 @@ tagged calibrated fallback -- behavior is unchanged for anyone who hasn't
 configured a key, and any fallback stays honestly tagged
 (``feed_type=PARTNER_API`` + ``extraction_method=CALIBRATED_MODEL``).
 
-Schema-status note (important): the Flight Shop request here follows the
-documented ``v1/offers/flightShop`` reference, but the *response* parser is
-written defensively against the documented offer model (Offers -> Price /
-Flights -> FlightNumber / Carrier / ScheduledDateTime) because no live
-response payload was available at development time (no sandbox credential in
-this environment). If the live response differs, the parser degrades
-gracefully (empty result -> calibrated fallback, never fabricated REAL data);
-reconcile ``parse_flight_shop`` against one real response once a credential
-exists. The quote ``is_synthetic`` flag stays False ONLY for genuinely
-extracted API data.
+Schema-status note (important, updated 2026-09 with a real sandbox
+credential): the request shape above (``journeys``/``travelers``) is
+confirmed correct -- the originally-documented ``SearchCriteria``/``Leg``
+shape 400s live. However, this project's free self-service Dev Studio
+account provisions a shared ``DEVCENTER`` PCC (Pseudo City Code), and every
+live query tried against it -- including Sabre's own documented example
+route -- returns HTTP 200 with no offers at all (``{"timestamp": ...}``,
+nothing else). A PCC governs what data an account can actually shop, and
+``DEVCENTER`` reads as a generic sandbox identity not connected to a live
+availability cache, not a route/geography restriction. So: the *request* side
+is verified against the real API; the *response* parser below is still
+written defensively against the documented offer model without ever having
+seen one populated, because no query -- in any market -- has returned one.
+It still degrades safely (empty result -> calibrated fallback, never
+fabricated REAL data) either way; reconcile ``parse_flight_shop`` against a
+real populated response if/when a production-provisioned PCC is available.
+The quote ``is_synthetic`` flag stays False ONLY for genuinely extracted API
+data.
 """
 
 import base64
@@ -153,14 +165,19 @@ class SabreScraper(BaseOTAScraper):
             or settings.SABRE_TOKEN_URL
             or f"{self._base_url()}/v2/auth/token"
         )
-        basic = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        # Sabre's documented "Convert Access Token Credentials" scheme for the
+        # classic V1:userId:PCC:domain credential format: base64 the client
+        # ID and secret SEPARATELY, concatenate with a colon, then base64 the
+        # whole thing again for the Basic auth header. A single base64(user:pass)
+        # (the generic OAuth2 pattern) gets a 401 invalid_client from Sabre for
+        # this credential shape -- confirmed live 2026-09 once a real
+        # sandbox credential was available (see module docstring).
+        encoded_id = base64.b64encode(username.encode("utf-8")).decode("ascii")
+        encoded_secret = base64.b64encode(password.encode("utf-8")).decode("ascii")
+        basic = base64.b64encode(f"{encoded_id}:{encoded_secret}".encode("utf-8")).decode("ascii")
         resp = requests.post(
             token_url,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": username,
-                "client_secret": password,
-            },
+            data={"grant_type": "client_credentials"},
             headers={
                 "Authorization": f"Basic {basic}",
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -200,20 +217,20 @@ class SabreScraper(BaseOTAScraper):
             or settings.SABRE_SHOP_URL
             or f"{self._base_url()}/v1/offers/flightShop"
         )
+        # Confirmed live 2026-09 against api-crt.cert.havail.sabre.com: the
+        # originally-documented SearchCriteria/Leg/PTC shape gets a 400
+        # REQUIRED_FIELD_MISSING for "journeys, travelers" -- the live
+        # endpoint expects this journeys/travelers shape instead.
         body = {
-            "SearchCriteria": {
-                "Leg": [
-                    {
-                        "From": {"AirportCode": origin_airport},
-                        "To": {"AirportCode": destination_airport},
-                        "Date": travel_date.isoformat(),
-                    }
-                ],
-                "PTC": ["ADT"],
-                "CabinPreferences": [{"CabinType": "ECONOMY"}],
-                "CurrencyCode": "INR",
-            },
-            "ClientContext": {"ClientToken": str(uuid.uuid4())},
+            "journeys": [
+                {
+                    "departureLocation": {"airportCode": origin_airport},
+                    "arrivalLocation": {"airportCode": destination_airport},
+                    "departureDate": travel_date.isoformat(),
+                }
+            ],
+            "travelers": [{"passengerTypeCode": "ADT"}],
+            "clientContext": {"clientToken": str(uuid.uuid4())},
         }
         resp = requests.post(shop_url, json=body, headers=headers, timeout=30)
         # One transparent retry on an expired/rotated token, then let the

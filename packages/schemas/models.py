@@ -64,6 +64,7 @@ class Route(Base):
     destination_airport = Column(String(10), nullable=False)  # BOM
     route_code = Column(String(20), unique=True, nullable=False)  # DEL-BOM
     corridor_type = Column(String(50), default="METRO_TRUNK")  # METRO_TRUNK, REGIONAL_THIN
+    distance_km = Column(Integer, nullable=True)  # Great-circle (haversine) airport-to-airport distance
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=utcnow)
 

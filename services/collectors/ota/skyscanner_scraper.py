@@ -38,6 +38,7 @@ import requests
 
 from packages.shared.config import settings
 from services.collectors.ota.base_ota_scraper import BaseOTAScraper
+from services.collectors.ota.registry import register_ota_scraper
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ class RapidAPIKeyMissing(Exception):
     """Raised when RAPIDAPI_KEY isn't configured -- triggers the calibrated fallback."""
 
 
+@register_ota_scraper("Skyscanner India")
 class SkyscannerScraper(BaseOTAScraper):
     """Metasearch collector querying Skyscanner India discovery pricing.
 

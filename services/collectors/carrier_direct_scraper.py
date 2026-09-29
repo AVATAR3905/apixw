@@ -17,6 +17,7 @@ from playwright.async_api import async_playwright
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import RawPayload, Source
+from packages.shared.config import settings
 from packages.shared.time_utils import utcnow
 from services.collectors.browser_pool import BrowserUnavailable, get_browser_pool
 from services.collectors.circuit_breaker import (
@@ -193,7 +194,7 @@ class CarrierDirectScraper:
         """Playwright launch path used when the pool cannot provision a context."""
         async with async_playwright() as p:
             browser = await p.chromium.launch(
-                headless=True,
+                headless=settings.BROWSE_HEADLESS,
                 args=[
                     "--disable-blink-features=AutomationControlled",
                     "--no-sandbox",
@@ -794,57 +795,67 @@ class CarrierDirectScraper:
         advance_days: int,
         screenshot_path: Optional[str],
     ) -> List[Dict[str, Any]]:
-        """Attempts live extraction from a screenshot when DOM parsing failed."""
+        """Attempts live extraction from a screenshot when DOM parsing failed.
+
+        Uses the same multi-card OCR extraction (``card_extraction.py``) the
+        OTA scrapers rely on, so a results page with N real flights yields N
+        observations instead of collapsing the whole page into a single
+        field-set (the previous behaviour here silently capped every OCR
+        fallback at exactly one quote, regardless of how many flights were
+        actually visible in the screenshot).
+        """
         if not screenshot_path:
             return []
         try:
-            from services.extraction.adaptive_extractor import (
-                AdaptiveExtractor,
-                ExtractionContext,
-            )
+            from services.collectors.ota.card_extraction import extract_cards_from_screenshot
 
             # OCR only in the live scraper: the VLM weight set is far too slow to
             # load mid-collection for a single screenshot. VLM stays an explicit
             # offline/verify-stage tool.
-            result = AdaptiveExtractor(allow_vlm=False).extract(
-                ExtractionContext(
-                    image_path=screenshot_path,
-                    reference_date=date_str,
-                )
+            cards = extract_cards_from_screenshot(
+                image_path=screenshot_path,
+                reference_date=date_str,
+                allow_vlm=False,
             )
-            price = result.fields.get("price")
-            if not price:
+            if not cards:
                 return []
 
-            extracted_travel_date = result.fields.get("travel_date")
-            if extracted_travel_date and extracted_travel_date != date_str:
-                logger.warning(
-                    "OCR date mismatch on %s screenshot: page shows %s, queried %s",
-                    carrier_code.upper(), extracted_travel_date, date_str,
-                )
+            quotes = []
+            for card in cards:
+                price = card.get("price")
+                if not price:
+                    continue
 
-            return [
-                {
-                    "source": "CARRIER_DIRECT",
-                    "carrier_code": carrier_code.upper(),
-                    "carrier_name": result.fields.get("airline_name") or self._carrier_name(carrier_code),
-                    "origin_airport": result.fields.get("origin") or origin,
-                    "destination_airport": result.fields.get("destination") or dest,
-                    "travel_date": extracted_travel_date or date_str,
-                    "return_date": result.fields.get("return_date"),
-                    "advance_purchase_days": advance_days,
-                    "flight_number": result.fields.get("flight_number") or f"{carrier_code.upper()}-101",
-                    "departure_time": result.fields.get("departure_time") or "09:00",
-                    "arrival_time": result.fields.get("arrival_time"),
-                    "stops": result.fields.get("stops", 0),
-                    "duration_minutes": result.fields.get("duration_minutes"),
-                    "total_fare": float(price),
-                    "cabin_class": "ECONOMY",
-                    "fare_family": "BASIC",
-                    "feed_type": "CARRIER_DIRECT",
-                    "extraction_method": result.extraction_method,
-                }
-            ]
+                extracted_travel_date = card.get("travel_date")
+                if extracted_travel_date and extracted_travel_date != date_str:
+                    logger.warning(
+                        "OCR date mismatch on %s screenshot: page shows %s, queried %s",
+                        carrier_code.upper(), extracted_travel_date, date_str,
+                    )
+
+                quotes.append(
+                    {
+                        "source": "CARRIER_DIRECT",
+                        "carrier_code": carrier_code.upper(),
+                        "carrier_name": card.get("airline_name") or self._carrier_name(carrier_code),
+                        "origin_airport": card.get("origin") or origin,
+                        "destination_airport": card.get("destination") or dest,
+                        "travel_date": extracted_travel_date or date_str,
+                        "return_date": card.get("return_date"),
+                        "advance_purchase_days": advance_days,
+                        "flight_number": card.get("flight_number") or f"{carrier_code.upper()}-{101 + len(quotes)}",
+                        "departure_time": card.get("departure_time") or "09:00",
+                        "arrival_time": card.get("arrival_time"),
+                        "stops": card.get("stops", 0),
+                        "duration_minutes": card.get("duration_minutes"),
+                        "total_fare": float(price),
+                        "cabin_class": "ECONOMY",
+                        "fare_family": "BASIC",
+                        "feed_type": "CARRIER_DIRECT",
+                        "extraction_method": card.get("_extraction_method", "OCR"),
+                    }
+                )
+            return quotes
         except Exception as e:
             logger.warning("OCR extraction unavailable for %s: %s", screenshot_path, e)
             return []
