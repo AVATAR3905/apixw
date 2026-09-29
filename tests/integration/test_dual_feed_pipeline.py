@@ -16,6 +16,20 @@ def test_client():
 
 def test_dual_feed_execution_and_storage(carrier_direct_live_fake):
     """Runs a real-world collection cycle and verifies that observations have is_synthetic=False."""
+    db_before = SessionLocal()
+    try:
+        # Snapshot the max id first -- this test writes through the same
+        # SessionLocal() the live app uses (no isolated test DB), so cleanup
+        # must be scoped to exactly the rows this test creates, never a
+        # broad filter that could touch real collected data (see
+        # CONTRIBUTING.md's test-isolation rule; a prior bug here left every
+        # run permanently inserting fake-but-is_synthetic=False rows into
+        # the tracked database with no cleanup at all).
+        max_id_before = db_before.query(FareObservation.id).order_by(FareObservation.id.desc()).first()
+        max_id_before = max_id_before[0] if max_id_before else 0
+    finally:
+        db_before.close()
+
     result = run_dual_feed_collection(route_code="DEL-BOM", advance_days=7)
 
     assert result["total_flights_evaluated"] > 0
@@ -51,6 +65,10 @@ def test_dual_feed_execution_and_storage(carrier_direct_live_fake):
         assert len(audits) > 0
 
     finally:
+        db.query(FareObservation).filter(FareObservation.id > max_id_before).delete(
+            synchronize_session=False
+        )
+        db.commit()
         db.close()
 
 
