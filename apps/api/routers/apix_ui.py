@@ -56,6 +56,8 @@ class RouteOut(BaseModel):
     dgca_traffic_weight: Optional[float] = None
     is_proxy_weight: bool
     is_active: Optional[bool] = None
+    carriers: List[str] = []
+    flight_count: int = 0
 
 
 class IndexPointOut(BaseModel):
@@ -353,15 +355,35 @@ def list_routes(session: Session = Depends(get_db)) -> List[RouteOut]:
     latest_weights: Dict[int, float] = {}
     for w in session.query(RouteWeight).order_by(RouteWeight.period, RouteWeight.id).all():
         latest_weights[w.route_id] = w.weight
+
+    airline_codes = {a.id: a.code for a in session.query(Airline).all()}
+    route_ids = [r.id for r in routes]
+    carriers_by_route: Dict[int, set] = {}
+    flight_numbers_by_route: Dict[int, set] = {}
+    for route_id, airline_id, flight_number in (
+        session.query(
+            FareObservation.route_id,
+            FareObservation.airline_id,
+            FareObservation.flight_number,
+        )
+        .filter(FareObservation.route_id.in_(route_ids))
+        .all()
+    ):
+        flight_numbers_by_route.setdefault(route_id, set()).add(flight_number)
+        if airline_id in airline_codes:
+            carriers_by_route.setdefault(route_id, set()).add(airline_codes[airline_id])
+
     return [
         RouteOut(
             id=r.id,
             origin_iata=r.origin_airport,
             destination_iata=r.destination_airport,
-            distance_km=None,
+            distance_km=r.distance_km,
             dgca_traffic_weight=latest_weights.get(r.id),
             is_proxy_weight=latest_weights.get(r.id) is None,
             is_active=r.active,
+            carriers=sorted(carriers_by_route.get(r.id, set())),
+            flight_count=len(flight_numbers_by_route.get(r.id, set())),
         )
         for r in routes
     ]
