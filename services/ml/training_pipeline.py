@@ -12,7 +12,6 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -179,6 +178,8 @@ class LightGBMTrainer:
         random_state: int = 42,
         calibration_alpha: float = 0.1,
     ):
+        import lightgbm as lgb
+
         self.params = {
             "objective": "regression",
             "metric": "mae",
@@ -206,6 +207,8 @@ class LightGBMTrainer:
         feature_cols: List[str],
     ) -> Dict[int, ModelMetrics]:
         """Train separate model for each forecast horizon."""
+        import lightgbm as lgb
+
         metrics = {}
 
         for h in self.horizons:
@@ -349,6 +352,8 @@ class LightGBMTrainer:
     @classmethod
     def load(cls, path: Path) -> "LightGBMTrainer":
         """Load trained models."""
+        import lightgbm as lgb
+
         with open(path / "feature_columns.json") as f:
             feature_columns = json.load(f)
 

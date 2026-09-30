@@ -13,7 +13,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from playwright.async_api import async_playwright
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import RawPayload, Source
@@ -192,6 +191,8 @@ class CarrierDirectScraper:
         db: Optional[Session] = None,
     ) -> List[Dict[str, Any]]:
         """Playwright launch path used when the pool cannot provision a context."""
+        from playwright.async_api import async_playwright
+
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=settings.BROWSE_HEADLESS,

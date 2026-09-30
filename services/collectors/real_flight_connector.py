@@ -12,7 +12,6 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from fast_flights import FlightQuery, Passengers, create_query, get_flights
 from sqlalchemy.orm import Session
 
 from packages.schemas.models import RawPayload, Source
@@ -76,6 +75,8 @@ class RealFlightRPCConnector:
             return []
 
         def _fetch():
+            from fast_flights import FlightQuery, Passengers, create_query, get_flights
+
             query = create_query(
                 flights=[
                     FlightQuery(

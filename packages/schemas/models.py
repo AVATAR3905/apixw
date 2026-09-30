@@ -156,7 +156,7 @@ class FareObservation(Base):
         String(30), default="ACCEPT"
     )  # ACCEPT, ACCEPT_WITH_WARNING, REVIEW, REJECT
 
-    collector_version = Column(String(20), default="1.0.0")
+    collector_version = Column(String(64), default="1.0.0")
     schema_version = Column(String(20), default="2.0.0")
     raw_payload_id = Column(Integer, ForeignKey("raw_payloads.id"), nullable=True)
 
