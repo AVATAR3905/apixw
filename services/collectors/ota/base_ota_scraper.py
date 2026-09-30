@@ -39,7 +39,12 @@ class BaseOTAScraper(ABC):
         self.domain = domain
         self.standard_convenience_fee = standard_convenience_fee
         self.raw_dir = os.path.join(raw_dir, domain.replace(".", "_"))
-        os.makedirs(self.raw_dir, exist_ok=True)
+        try:
+            os.makedirs(self.raw_dir, exist_ok=True)
+        except OSError:
+            # Read-only filesystem (e.g. a deployed serverless function that
+            # never persists raw scrape payloads to disk locally).
+            pass
 
         self.circuit_breaker = CircuitBreaker(
             source_id=self.source_id,

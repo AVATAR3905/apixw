@@ -82,7 +82,12 @@ class CarrierDirectScraper:
 
     def __init__(self, raw_dir: str = "data/raw/live/carrier_direct"):
         self.raw_dir = raw_dir
-        os.makedirs(raw_dir, exist_ok=True)
+        try:
+            os.makedirs(raw_dir, exist_ok=True)
+        except OSError:
+            # Read-only filesystem (e.g. a deployed serverless function that
+            # never persists raw scrape payloads to disk locally).
+            pass
         self.circuit_breaker = CircuitBreaker(
             source_id=5,
             source_name=self.SOURCE_NAME,
