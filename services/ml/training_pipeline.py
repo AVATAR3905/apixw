@@ -26,7 +26,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MODEL_DIR = Path("models/forecast")
-MODEL_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # Read-only filesystem (e.g. a deployed serverless function that never
+    # trains/saves models locally) -- MODEL_DIR still resolves fine for
+    # read paths; only save() would need a writable directory.
+    pass
 
 
 @dataclass
