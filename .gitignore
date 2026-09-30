@@ -69,3 +69,6 @@ data/raw/
 # tree, or the sync-from-github script's "is anything dirty?" safety check
 # would permanently block itself the moment it writes its own log line.
 logs/
+
+.vercel
+.env*

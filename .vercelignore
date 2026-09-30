@@ -1,0 +1,15 @@
+apps/dashboard
+tests
+docs
+data
+logs
+models
+scripts
+config
+*.db
+.git
+__pycache__
+.venv
+venv
+Design rules
+*.md

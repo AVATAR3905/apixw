@@ -1,0 +1,15 @@
+apps/dashboard
+tests
+scripts
+docs
+data
+logs
+models
+*.db
+.git
+.next
+node_modules
+__pycache__
+*.pyc
+.venv
+venv

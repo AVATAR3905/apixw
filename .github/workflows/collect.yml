@@ -5,8 +5,14 @@ name: Collect Real Airfare Data
 # off the local machine. Times below are IST, expressed as UTC for GitHub's
 # cron (IST = UTC+5:30): 06:00 -> 00:30, 12:00 -> 06:30, 18:00 -> 12:30,
 # 23:00 -> 17:30. This repo is public, so GitHub-hosted runner minutes are
-# unlimited/free; none of the sources this script hits need an API key, so
-# no repo secrets are required for it to run.
+# unlimited/free; none of the sources this script hits need an API key, but
+# a DATABASE_URL repo secret (the shared Neon Postgres) is required.
+#
+# Writes straight into the shared Neon Postgres DB (via the DATABASE_URL
+# repo secret) that the deployed Fly.io API also reads from -- the same DB
+# the dashboard shows live, no separate sync/ingest step. The local SQLite
+# file (airfare_observatory.db) is no longer updated or committed by this
+# workflow; it stays purely a local-dev fallback (see database/session.py).
 #
 # Known real tradeoff, not a hypothetical: GitHub's runners are datacenter
 # IPs, the same class of address IndiGo is already confirmed to block on IP
@@ -23,9 +29,6 @@ on:
     - cron: "30 12 * * *"
     - cron: "30 17 * * *"
   workflow_dispatch: {}
-
-permissions:
-  contents: write
 
 jobs:
   collect:
@@ -52,16 +55,4 @@ jobs:
         run: python scripts/collect_full_real_coverage.py
         env:
           SCRAPE_MODE: live
-
-      - name: Commit and push updated database
-        run: |
-          git config user.name "apix-collector-bot"
-          git config user.email "actions@github.com"
-          git add airfare_observatory.db
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: automated data collection $(date -u +'%Y-%m-%d %H:%M UTC')"
-            git pull --rebase origin main
-            git push
-          else
-            echo "No changes to commit."
-          fi
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
