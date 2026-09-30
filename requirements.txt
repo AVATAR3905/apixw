@@ -5,6 +5,7 @@ pydantic-settings>=2.4.0
 sqlalchemy>=2.0.30
 alembic>=1.13.0
 psycopg2-binary>=2.9.9
+psycopg[binary]>=3.1
 asyncpg>=0.29.0
 pandas>=2.2.0
 polars>=1.6.0
