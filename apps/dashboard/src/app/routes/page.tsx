@@ -24,16 +24,16 @@ export default function RouteMatrixPage() {
   const [expandedRoute, setExpandedRoute] = useState<string | null>("DEL-BOM");
 
   const defaultCorridors = [
-    { code: "DEL-BOM", name: "Delhi ↔ Mumbai", airports: "DEL - BOM", type: "METRO_TRUNK", weight: 18.4, idx: "100.0", d1: "0.0%", d7: "+1.2%", d30: "+4.5%", fare: "₹3,000", status: "NORMAL", carriers: "6E, AI, SG, QP", flights: 44 },
-    { code: "DEL-BLR", name: "Delhi ↔ Bengaluru", airports: "DEL - BLR", type: "METRO_TRUNK", weight: 14.2, idx: "100.0", d1: "0.0%", d7: "+1.1%", d30: "+4.2%", fare: "₹3,500", status: "NORMAL", carriers: "6E, AI, I5, QP", flights: 38 },
-    { code: "BOM-BLR", name: "Mumbai ↔ Bengaluru", airports: "BOM - BLR", type: "METRO_TRUNK", weight: 12.1, idx: "100.0", d1: "0.0%", d7: "+0.9%", d30: "+3.8%", fare: "₹2,800", status: "NORMAL", carriers: "6E, AI, QP", flights: 32 },
-    { code: "DEL-CCU", name: "Delhi ↔ Kolkata", airports: "DEL - CCU", type: "METRO_TRUNK", weight: 10.5, idx: "100.0", d1: "0.0%", d7: "+1.4%", d30: "+4.9%", fare: "₹3,400", status: "NORMAL", carriers: "6E, AI, SG", flights: 26 },
-    { code: "DEL-HYD", name: "Delhi ↔ Hyderabad", airports: "DEL - HYD", type: "METRO_TRUNK", weight: 9.8, idx: "100.0", d1: "0.0%", d7: "+1.0%", d30: "+3.9%", fare: "₹3,200", status: "NORMAL", carriers: "6E, AI, QP", flights: 24 },
-    { code: "BOM-MAA", name: "Mumbai ↔ Chennai", airports: "BOM - MAA", type: "METRO_TRUNK", weight: 8.6, idx: "100.0", d1: "0.0%", d7: "+0.8%", d30: "+3.5%", fare: "₹3,100", status: "NORMAL", carriers: "6E, AI", flights: 20 },
-    { code: "BLR-HYD", name: "Bengaluru ↔ Hyderabad", airports: "BLR - HYD", type: "METRO_TRUNK", weight: 7.9, idx: "100.0", d1: "0.0%", d7: "+0.7%", d30: "+3.2%", fare: "₹2,600", status: "NORMAL", carriers: "6E, AI, QP", flights: 18 },
-    { code: "DEL-MAA", name: "Delhi ↔ Chennai", airports: "DEL - MAA", type: "METRO_TRUNK", weight: 7.5, idx: "100.0", d1: "0.0%", d7: "+1.1%", d30: "+4.0%", fare: "₹3,600", status: "NORMAL", carriers: "6E, AI", flights: 18 },
-    { code: "DEL-IXS", name: "Delhi ↔ Silchar", airports: "DEL - IXS", type: "REGIONAL_THIN", weight: 5.8, idx: "100.0", d1: "0.0%", d7: "+2.1%", d30: "+6.8%", fare: "₹5,200", status: "VOLATILE", carriers: "6E, SG", flights: 8 },
-    { code: "DEL-DHM", name: "Delhi ↔ Dharamshala", airports: "DEL - DHM", type: "REGIONAL_THIN", weight: 5.2, idx: "100.0", d1: "0.0%", d7: "+1.9%", d30: "+6.2%", fare: "₹4,800", status: "VOLATILE", carriers: "6E, SG", flights: 8 },
+    { code: "DEL-BOM", name: "Delhi ↔ Mumbai", airports: "DEL - BOM", type: "METRO_TRUNK", weight: 18.4, idx: "100.0", d1: "0.0%", d7: "+1.2%", d30: "+4.5%", fare: "₹3,000", status: "NORMAL", carriers: "6E, AI, SG, QP", flights: 44, distance_km: 1137 },
+    { code: "DEL-BLR", name: "Delhi ↔ Bengaluru", airports: "DEL - BLR", type: "METRO_TRUNK", weight: 14.2, idx: "100.0", d1: "0.0%", d7: "+1.1%", d30: "+4.2%", fare: "₹3,500", status: "NORMAL", carriers: "6E, AI, I5, QP", flights: 38, distance_km: 1740 },
+    { code: "BOM-BLR", name: "Mumbai ↔ Bengaluru", airports: "BOM - BLR", type: "METRO_TRUNK", weight: 12.1, idx: "100.0", d1: "0.0%", d7: "+0.9%", d30: "+3.8%", fare: "₹2,800", status: "NORMAL", carriers: "6E, AI, QP", flights: 32, distance_km: 837 },
+    { code: "DEL-CCU", name: "Delhi ↔ Kolkata", airports: "DEL - CCU", type: "METRO_TRUNK", weight: 10.5, idx: "100.0", d1: "0.0%", d7: "+1.4%", d30: "+4.9%", fare: "₹3,400", status: "NORMAL", carriers: "6E, AI, SG", flights: 26, distance_km: 1305 },
+    { code: "DEL-HYD", name: "Delhi ↔ Hyderabad", airports: "DEL - HYD", type: "METRO_TRUNK", weight: 9.8, idx: "100.0", d1: "0.0%", d7: "+1.0%", d30: "+3.9%", fare: "₹3,200", status: "NORMAL", carriers: "6E, AI, QP", flights: 24, distance_km: 1253 },
+    { code: "BOM-MAA", name: "Mumbai ↔ Chennai", airports: "BOM - MAA", type: "METRO_TRUNK", weight: 8.6, idx: "100.0", d1: "0.0%", d7: "+0.8%", d30: "+3.5%", fare: "₹3,100", status: "NORMAL", carriers: "6E, AI", flights: 20, distance_km: 1030 },
+    { code: "BLR-HYD", name: "Bengaluru ↔ Hyderabad", airports: "BLR - HYD", type: "METRO_TRUNK", weight: 7.9, idx: "100.0", d1: "0.0%", d7: "+0.7%", d30: "+3.2%", fare: "₹2,600", status: "NORMAL", carriers: "6E, AI, QP", flights: 18, distance_km: 456 },
+    { code: "DEL-MAA", name: "Delhi ↔ Chennai", airports: "DEL - MAA", type: "METRO_TRUNK", weight: 7.5, idx: "100.0", d1: "0.0%", d7: "+1.1%", d30: "+4.0%", fare: "₹3,600", status: "NORMAL", carriers: "6E, AI", flights: 18, distance_km: 1760 },
+    { code: "DEL-IXS", name: "Delhi ↔ Silchar", airports: "DEL - IXS", type: "REGIONAL_THIN", weight: 5.8, idx: "100.0", d1: "0.0%", d7: "+2.1%", d30: "+6.8%", fare: "₹5,200", status: "VOLATILE", carriers: "6E, SG", flights: 8, distance_km: 1627 },
+    { code: "DEL-DHM", name: "Delhi ↔ Dharamshala", airports: "DEL - DHM", type: "REGIONAL_THIN", weight: 5.2, idx: "100.0", d1: "0.0%", d7: "+1.9%", d30: "+6.2%", fare: "₹4,800", status: "VOLATILE", carriers: "6E, SG", flights: 8, distance_km: 409 },
   ];
 
   const [corridors, setCorridors] = useState(defaultCorridors);
@@ -57,6 +57,7 @@ export default function RouteMatrixPage() {
             status: c.corridor_type === "REGIONAL_THIN" ? "VOLATILE" : "NORMAL",
             carriers: c.carriers && c.carriers.length > 0 ? c.carriers.join(", ") : "No data yet",
             flights: c.flight_count || 0,
+            distance_km: c.distance_km ?? 0,
           }))
         );
       }
@@ -163,6 +164,7 @@ export default function RouteMatrixPage() {
                 <th className="px-6 py-3.5 font-medium">Corridor</th>
                 <th className="px-6 py-3.5 font-medium">Classification</th>
                 <th className="px-6 py-3.5 font-medium">DGCA Weight</th>
+                <th className="px-6 py-3.5 font-medium">Distance</th>
                 <th className="px-6 py-3.5 font-medium">Median Base Fare</th>
                 <th className="px-6 py-3.5 font-medium">Route Index (T+15)</th>
                 <th className="px-6 py-3.5 font-medium">1-Day</th>
@@ -215,6 +217,10 @@ export default function RouteMatrixPage() {
                         </div>
                       </td>
 
+                      <td className="px-6 py-4 font-mono text-mid-gray font-medium">
+                        {c.distance_km ? `${c.distance_km.toLocaleString()} km` : "—"}
+                      </td>
+
                       <td className="px-6 py-4 font-mono font-semibold text-ink text-sm">{c.fare}</td>
 
                       <td className="px-6 py-4">
@@ -240,7 +246,7 @@ export default function RouteMatrixPage() {
                     {/* Expandable row content */}
                     {isExpanded && (
                       <tr className="bg-canvas border-b border-hairline">
-                        <td colSpan={9} className="px-6 py-4">
+                        <td colSpan={10} className="px-6 py-4">
                           <div className="rounded-nested border border-hairline bg-paper p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-subtle">
                             <div className="space-y-1">
                               <div className="text-xs font-semibold text-ink flex items-center gap-2">

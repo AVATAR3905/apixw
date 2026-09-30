@@ -61,6 +61,7 @@ export interface CorridorItem {
   representative_price: number | null;
   carriers: string[];
   flight_count: number;
+  distance_km: number | null;
 }
 
 export interface RouteDetailResponse {

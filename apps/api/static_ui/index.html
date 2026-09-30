@@ -100,15 +100,10 @@
         <button data-view="routes" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Routes</button>
         <button data-view="route-index" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Route index</button>
         <button data-view="heatmap" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Heatmap</button>
-        <button data-view="elasticity" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Elasticity</button>
         <button data-view="fares" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Fares</button>
-        <button data-view="backtest" class="nav-btn rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[.08em] text-muted transition-all hover:bg-white hover:text-ink">Backtest</button>
       </nav>
 
       <div class="flex items-center gap-2">
-        <span id="dataBadge" class="hidden items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-2 text-xs font-semibold md:flex"></span>
-        <button id="modeLive" class="hidden rounded-full border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold transition hover:bg-white md:flex">Live</button>
-        <button id="modeDemo" class="hidden rounded-full border border-black/10 bg-white/60 px-3 py-2 text-xs font-semibold transition hover:bg-white md:flex">Demo</button>
         <div id="healthPill" class="hidden items-center gap-2 rounded-full border border-black/5 bg-white/60 px-3 py-2 text-xs font-medium md:flex">
           <span class="h-2 w-2 rounded-full bg-amberx"></span>
           <span>Connecting</span>
@@ -124,9 +119,7 @@
         <button data-view="routes" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Routes</button>
         <button data-view="route-index" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Route index</button>
         <button data-view="heatmap" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Heatmap</button>
-        <button data-view="elasticity" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Elasticity</button>
         <button data-view="fares" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Fares</button>
-        <button data-view="backtest" class="mobile-nav-btn rounded-2xl bg-white/70 px-3 py-3 text-sm font-semibold">Backtest</button>
       </div>
     </div>
   </header>
@@ -264,16 +257,6 @@
       </div>
     </section>
 
-    <!-- ELASTICITY -->
-    <section id="view-elasticity" class="view hidden">
-      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Purchase timing</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Fare elasticity</h2><p class="mt-2 text-muted">Explore the relationship between airfare and advance-purchase days.</p></div>
-      <div class="glass rounded-[30px] p-5 md:p-7">
-        <select id="elRoute" class="control max-w-xs"></select>
-        <div id="elNote" class="mt-4 text-sm text-muted"></div>
-        <div class="chart-box mt-5"><canvas id="elasticChart"></canvas></div>
-      </div>
-    </section>
-
     <!-- FARES -->
     <section id="view-fares" class="view hidden">
       <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Cleaned observations</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Fare explorer</h2><p class="mt-2 text-muted">Search the cleaned fare layer behind the index.</p></div>
@@ -293,19 +276,6 @@
       </div>
     </section>
 
-    <!-- BACKTEST -->
-    <section id="view-backtest" class="view hidden">
-      <div class="mb-5"><div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Model validation</div><h2 class="mt-1 text-4xl font-medium tracking-[-.04em]">Backtest</h2><p class="mt-2 text-muted">APIx versus the benchmark across comparable historical months.</p></div>
-      <div class="grid gap-5 lg:grid-cols-[340px_1fr]">
-        <div class="glass rounded-[30px] p-6">
-          <div class="text-xs font-semibold uppercase tracking-[.14em] text-muted">Validation summary</div>
-          <div id="btStats" class="mt-6 space-y-4"></div>
-        </div>
-        <div class="glass rounded-[30px] p-5 md:p-7"><div class="chart-box"><canvas id="backtestChart"></canvas></div></div>
-      </div>
-      <div class="glass mt-5 overflow-hidden rounded-[30px]"><div class="overflow-x-auto"><table id="btTable" class="w-full min-w-[600px] text-left text-sm"></table></div></div>
-    </section>
-
     <footer class="mt-14 flex flex-col justify-between gap-4 border-t border-black/10 pt-6 text-xs text-muted md:flex-row">
       <div>APIx · Real-time Airfare Price Index Backend</div>
       <div class="flex gap-5"><span>FastAPI</span><span>PostgreSQL (SQLite dev fallback)</span><span>Median + Min index</span><span>Indian domestic routes</span></div>
@@ -319,11 +289,6 @@
   const charts = {};
   let routes = [];
   let farePage = 1;
-
-  function setMode(base){
-    localStorage.setItem('apix_api_base', base);
-    location.reload();
-  }
 
   const mock = {
     routes: [
@@ -376,7 +341,7 @@
 
   function populateRoutes(){
     const codes = routes.map(r=>r.origin_iata+'-'+r.destination_iata);
-    ['riRoute','hmRoute','elRoute'].forEach(id=>{
+    ['riRoute','hmRoute'].forEach(id=>{
       const s=$('#'+id); s.innerHTML=codes.map(c=>`<option value="${c}">${c}</option>`).join('');
     });
     $('#faRoute').innerHTML='<option value="">All routes</option>'+codes.map(c=>`<option value="${c}">${c}</option>`).join('');
@@ -432,13 +397,6 @@
     catch{data={points:fakeSeries().points};}
     const pts=data.points||[]; chart('routeChart',pts.map(p=>p.index_date),[ds($('#riRoute').value,pts.map(p=>Number(p.index_value)),{backgroundColor:'rgba(17,17,15,.07)'})]);
   }
-  async function elasticity(){
-    let data; try{data=await api('/analytics/elasticity?'+params({route:$('#elRoute').value}));}
-    catch{data={route:$('#elRoute').value,points:[1,7,15,30,45].map((x,i)=>({advance_purchase_days:x,median_fare_inr:7200-i*740+(Math.random()*500)}))};}
-    $('#elNote').textContent=`Observed fare vs advance purchase days for ${data.route||$('#elRoute').value}`;
-    const pts=data.points||[];
-    chart('elasticChart',pts.map(p=>'APD '+p.advance_purchase_days),[ds('Median fare (INR)',pts.map(p=>Number(p.median_fare_inr??p.avg_fare_inr??p.min_fare_inr)),{backgroundColor:'rgba(183,110,61,.12)'})]);
-  }
   async function heatmap(){
     const route=$('#hmRoute').value, from=$('#hmFrom').value, to=$('#hmTo').value;
     if(!from||!to)return;
@@ -466,38 +424,22 @@
     table($('#fareTable'),['ID','Observed','Route','Carrier','Flight','Cabin','Total fare','APD','Nonstop','Breakdown','Source'],
       items.map(f=>[f.id,f.observation_date,`${f.origin_iata}-${f.destination_iata}`,f.carrier_iata,f.flight_number||'—',f.cabin_class||'—',money(f.total_fare_inr),f.advance_purchase_days,f.is_nonstop?'Yes':'No',f.has_full_breakdown?'Yes':'No',f.source||'—']));
   }
-  async function backtest(){
-    let data; try{data=await api('/backtest');}catch{data={method:'median',months_compared:3,correlation:.91,mean_abs_deviation_pct:6.8,benchmark_source:'dummy_dgca',table:[['2026-07',101.2,97.4,3.9],['2026-08',104.7,102.1,2.5],['2026-09',108.4,111.0,-2.3]].map(r=>({month:r[0],apix:r[1],benchmark:r[2],deviation_pct:r[3]}))};}
-    $('#btStats').innerHTML=[
-      ['Method',data.method],['Months compared',data.months_compared],['Correlation',data.correlation==null?'n/a':Number(data.correlation).toFixed(3)],['Mean absolute deviation',data.mean_abs_deviation_pct==null?'n/a':data.mean_abs_deviation_pct+'%'],['Benchmark source',data.benchmark_source]
-    ].map(([a,b])=>`<div class="rounded-2xl bg-white/60 p-4"><div class="text-[10px] font-semibold uppercase tracking-[.12em] text-muted">${a}</div><div class="mt-1 text-lg font-semibold">${b}</div></div>`).join('');
-    const t=data.table||[];
-    table($('#btTable'),['Month','APIx','Benchmark','Deviation'],t.map(r=>[r.month,Number(r.apix).toFixed(2),Number(r.benchmark).toFixed(2),`${Number(r.deviation_pct).toFixed(2)}%`]));
-    chart('backtestChart',t.map(r=>r.month),[
-      ds('APIx',t.map(r=>Number(r.apix)),{fill:false}),
-      ds('Benchmark',t.map(r=>Number(r.benchmark)),{borderColor:'#8d8b84',pointBackgroundColor:'#8d8b84',backgroundColor:'transparent',fill:false})
-    ]);
-  }
-
   function selectView(name){
     $$('.view').forEach(v=>v.classList.toggle('hidden',v.id!=='view-'+name));
     $$('.nav-btn').forEach(b=>b.classList.toggle('nav-active',b.dataset.view===name));
     location.hash=name;
-    const fn={overview, routes:renderRoutes,'route-index':routeIndex,heatmap,elasticity,fares,backtest}[name];
+    const fn={overview, routes:renderRoutes,'route-index':routeIndex,heatmap,fares}[name];
     if(fn) fn().catch(e=>showError(e.message));
     $('#mobileNav').classList.add('hidden');
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
   function bind(){
-    $('#modeLive').onclick=()=>setMode('http://127.0.0.1:8000');
-    $('#modeDemo').onclick=()=>setMode('http://127.0.0.1:8001');
     $$('[data-view]').forEach(b=>b.addEventListener('click',()=>selectView(b.dataset.view)));
     $('#mobileMenu').onclick=()=>$('#mobileNav').classList.toggle('hidden');
     $('#ovFrequency').onchange=overview;
     ['riRoute','riFrequency','riApd','riMethod'].forEach(id=>$('#'+id).onchange=routeIndex);
     $('#hmRender').onclick=heatmap;
-    $('#elRoute').onchange=elasticity;
     $('#fareForm').onsubmit=e=>{e.preventDefault();farePage=1;fares();};
     $('#faPrev').onclick=()=>{if(farePage>1){farePage--;fares();}};
     $('#faNext').onclick=()=>{farePage++;fares();};
@@ -505,18 +447,12 @@
 
   async function init(){
     document.querySelectorAll('.control').forEach(el=>el.classList.add('rounded-2xl','border','border-black/10','bg-white/60','px-4','py-3','text-sm','outline-none','transition','focus:border-black/30','focus:ring-2','focus:ring-black/5'));
-    const mode = API_BASE.indexOf('8001') !== -1 || (!API_BASE && location.port === '8001') ? 'demo' : 'live';
-    $('#dataBadge').textContent = mode === 'demo' ? 'Demo · simulated history' : 'Live · real data';
-    ['modeLive','modeDemo'].forEach(id=>{
-      $('#'+id).classList.toggle('bg-[#11110f]',id==='mode'+(mode==='live'?'Live':'Demo'));
-      $('#'+id).classList.toggle('text-white',id==='mode'+(mode==='live'?'Live':'Demo'));
-    });
     const today=new Date(), thirty=new Date(today); thirty.setDate(today.getDate()-30);
     const tomorrow=new Date(today); tomorrow.setDate(today.getDate()+1);
     $('#hmFrom').value=thirty.toISOString().slice(0,10); $('#hmTo').value=today.toISOString().slice(0,10);
     $('#faTravFrom').value=tomorrow.toISOString().slice(0,10); $('#faTravTo').value=tomorrow.toISOString().slice(0,10);
     await loadRoutes(); bind();
-    const initial=location.hash.slice(1); selectView(['overview','routes','route-index','heatmap','elasticity','fares','backtest'].includes(initial)?initial:'overview');
+    const initial=location.hash.slice(1); selectView(['overview','routes','route-index','heatmap','fares'].includes(initial)?initial:'overview');
     lucide.createIcons();
   }
   init();

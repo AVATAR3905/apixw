@@ -16,14 +16,12 @@ import {
   Sparkles,
   BarChart3,
   FlaskConical,
-  FileText,
   Settings,
   Zap,
   LineChart,
   Shield,
   Database,
   Globe,
-  Clock,
   Gavel,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -86,7 +84,6 @@ const navigation: NavItem[] = [
     description: "Carrier dynamics, lead-time elasticity & volatility",
     children: [
       { label: "Carrier Power", href: "/carrier-inflation", icon: Zap },
-      { label: "Lead-Time Curves", href: "/lead-time", icon: Clock },
       { label: "Volatility Heatmap", href: "/fluctuations", icon: LineChart },
       { label: "Fuel Overlay", href: "/fuel-context", icon: FlaskConical },
     ],
@@ -98,7 +95,6 @@ const navigation: NavItem[] = [
     description: "Pipeline health, CPI validation & quality metrics",
     children: [
       { label: "Pipeline Status", href: "/governance", icon: Database },
-      { label: "CPI Validation", href: "/validation", icon: FileText },
       { label: "Data Quality", href: "/quality", icon: Shield },
       { label: "Source Registry", href: "/sources", icon: Globe },
       { label: "Methodology", href: "/methodology", icon: FlaskConical },
