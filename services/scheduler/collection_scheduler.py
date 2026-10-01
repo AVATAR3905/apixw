@@ -4,6 +4,7 @@ import datetime
 from typing import Any, Dict, Optional
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database.session import SessionLocal
@@ -86,12 +87,23 @@ class CollectionScheduler:
         )
         db.commit()
 
+        # Freshness window, not "any time today": the 4x-daily schedule
+        # (~05-07h apart) is meant to capture 4 separate real intra-day price
+        # snapshots, not 1 real collection plus 3 no-op reruns. Dedup only
+        # against completions from the last few hours -- long enough to
+        # still cover the crash-resume case this check exists for (an
+        # unhandled Node/Playwright crash mid-run; the workflow's own
+        # timeout-minutes caps a single run at 3h), short enough that the
+        # *next* scheduled run always finds the previous one's jobs stale
+        # and genuinely re-collects rather than skipping all 50 again.
+        freshness_cutoff = utcnow() - datetime.timedelta(hours=4)
         completed_today = {
             (row.route_id, row.advance_days)
             for row in db.query(CollectionJob.route_id, CollectionJob.advance_days).filter(
                 CollectionJob.search_date == search_date,
                 CollectionJob.source_id == source_id,
                 CollectionJob.status == "COMPLETED",
+                func.coalesce(CollectionJob.completed_at, CollectionJob.created_at) >= freshness_cutoff,
             )
         }
 
@@ -132,6 +144,7 @@ class CollectionScheduler:
                         res = active_connector.execute_job(db, job)
                         if res.success:
                             job.status = "COMPLETED"
+                            job.completed_at = utcnow()
                             job.collected_quotes_count = res.quotes_parsed
                             jobs_success += 1
                             total_quotes += res.quotes_parsed
@@ -152,6 +165,7 @@ class CollectionScheduler:
                         )
                         count = len(reconciliation.get("primary_observations", []))
                         job.status = "COMPLETED"
+                        job.completed_at = utcnow()
                         job.collected_quotes_count = count
                         jobs_success += 1
                         total_quotes += count
@@ -161,6 +175,7 @@ class CollectionScheduler:
                             res = active_connector.execute_job(db, job)
                             if res.success:
                                 job.status = "COMPLETED"
+                                job.completed_at = utcnow()
                                 jobs_success += 1
                                 total_quotes += res.quotes_parsed
                             else:
