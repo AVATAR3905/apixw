@@ -1,55 +1,55 @@
 # Restarting APIx After a Reboot
 
-A system restart kills the API server and the dashboard. Nothing is lost —
-the database (`airfare_observatory.db`) and all code are on disk — you just
-need to relaunch the two processes. Run everything below from the project
-root: `C:\Users\cecilia\Downloads\APIx-main\APIx-main`.
+The production site no longer depends on this machine being on at all — see
+"Live deployment" below. This file is about the **local development**
+copy: a system restart kills the local API server and local dashboard,
+but nothing is lost (the local SQLite fallback DB and all code are on
+disk) — you just need to relaunch the two processes. Run everything below
+from the project root: `C:\Users\cecilia\Downloads\APIx-main\APIx-main`.
+
+## Live deployment
+
+The real, production-facing stack runs independently of this machine:
+
+- **API**: https://apix-observatory-api.vercel.app (FastAPI, deployed as a
+  Vercel Python function; redeploys automatically on every push to `main`)
+- **Dashboard** (the one actually in use): https://apix-observatory-api.vercel.app/ui/
+  — a static single-file UI served by the same deployed API. (The separate
+  Next.js dashboard that used to run on local port 3000 is **not** deployed
+  anywhere anymore — local dev only, see below.)
+- **Database**: a shared Neon Postgres instance (`DATABASE_URL`, stored as a
+  Vercel secret and a GitHub Actions repo secret) — both the deployed API
+  and the scheduled collector read/write the same live data.
 
 ## Where data collection actually happens now
 
-**Real-data collection runs on GitHub Actions, not this machine.**
+**Real-data collection runs on GitHub Actions, writing straight into the
+shared Postgres above** — not into a file that gets committed back to git.
 `.github/workflows/collect.yml` runs the same 4x-daily cycle
-(06:00/12:00/18:00/23:00 IST) on GitHub's own infrastructure and commits the
-updated `airfare_observatory.db` back to `main` — it's completely
-independent of whether this machine, or the local API server, is even on.
-Check its history any time:
+(06:00/12:00/18:00/23:00 IST) on GitHub's own infrastructure, completely
+independent of whether this machine is even on. Check its history any time:
 
 ```bash
 gh run list --repo AVATAR3905/apixw --workflow="Collect Real Airfare Data"
 ```
 
-(Why: the local machine turned out to be unreliable for this — sleep/wake
-cycles, process crashes, and an in-process APScheduler that silently missed
-scheduled runs with no error. See `TASKS.md` v2.7/v2.8 changelog entries for
-the full history. Known tradeoff: GitHub's runner IPs are datacenter
-ranges, which has already fully blocked Akasa Air's carrier-direct feed
-there (robots.txt won't even serve to that IP range) — SpiceJet and the
-Google Flights RPC feed still work fine from GitHub; Ixigo/EaseMyTrip are
-inconsistent. Local collection generally gets better source coverage when
-it does work, which is the tradeoff being made here.)
+**The local "APIx Collection Cycle" scheduled task is disabled** (not
+deleted — re-enable with `Enable-ScheduledTask -TaskName "APIx Collection
+Cycle"` if you ever want local collection back). It used to scrape into the
+local `airfare_observatory.db` file independently of GitHub Actions, which
+made sense back when GitHub Actions committed its results to that same
+tracked file and the two needed reconciling — now that GitHub Actions
+writes directly to the shared Postgres instead, local collection would just
+be scraping into a SQLite file nothing downstream reads, so it's been
+turned off. The local SQLite file remains purely a local-dev fallback (see
+`database/session.py`): when `DATABASE_URL` isn't set (or the Postgres
+connection fails), the app transparently falls back to
+`sqlite:///./airfare_observatory.db`, same as always.
 
-**This machine just displays GitHub's data — it doesn't collect
-independently anymore.** The local "APIx Collection Cycle" scheduled task is
-**disabled** (not deleted, so it can be re-enabled if you ever want to go
-back to local collection). In its place, a new task, **"APIx GitHub Sync"**,
-runs every 30 minutes: it checks for new commits on GitHub and, only when
-there actually are some, stops the local API server (which holds the DB file
-open), pulls, and restarts it. If nothing's new, it's a no-op and doesn't
-touch the running server. Check its log:
-
-```powershell
-Get-Content "C:\Users\cecilia\Downloads\APIx-main\APIx-main\logs\sync_from_github.log" -Tail 20
-```
-
-or run it manually any time you want the latest data immediately, without
-waiting for the next 30-minute tick:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File "C:\Users\cecilia\Downloads\APIx-main\APIx-main\scripts\sync_from_github.ps1"
-```
-
-**Both of these Task Scheduler entries survive a reboot automatically** —
-nothing to redo after restarting Windows.
+The old "APIx GitHub Sync" scheduled task (pulling git commits every 30 min
+to pick up a freshly-committed DB file) is likewise obsolete and was already
+disabled — git commits no longer carry fresh data at all now, only code
+changes, so there's nothing for a sync task like that to do.
 
 ## 1. Check what's already running
 
@@ -59,12 +59,7 @@ netstat -ano | grep -E ":8000|:3000" | grep LISTENING
 
 If both lines show up, you're already good — skip to step 4 (health check).
 
-## 2. Start the API server (port 8000)
-
-Standalone launch — recommended (avoids the `run_observatory.py` cascade-kill
-issue noted below). This process still starts an in-process scheduler too,
-but that one is no longer what runs the real data collection — see the note
-above about Task Scheduler.
+## 2. Start the local API server (port 8000)
 
 ```bash
 nohup python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000 > /tmp/api.log 2>&1 &
@@ -76,7 +71,15 @@ Wait for it to bind before moving on:
 until netstat -ano | grep ":8000" | grep -q LISTENING; do sleep 2; done; echo "API is up"
 ```
 
-## 3. Start the dashboard (port 3000)
+By default (no `DATABASE_URL` env var set locally) this talks to the local
+SQLite fallback, not the shared production Postgres — set `DATABASE_URL` to
+the Neon connection string first if you want this local server to read/write
+the same live data the deployed site uses.
+
+## 3. Start the local dashboard (port 3000) — optional, local dev only
+
+Only needed if you're actively working on the Next.js dashboard itself; it
+isn't deployed anywhere and isn't what the live site shows.
 
 ```bash
 cd apps/dashboard
@@ -93,14 +96,14 @@ until netstat -ano | grep ":3000" | grep -q LISTENING; do sleep 2; done; echo "D
 ## 4. Health check
 
 ```bash
-curl -s "http://localhost:8000/api/v1/index?series=BASE_FARE&horizon=t15"
+curl -s "http://localhost:8000/health"
+curl -s "http://localhost:8000/api/v1/routes"
 ```
 
-Should return JSON with a real `index_value`. Then open whichever frontend
-you're using:
+Then open whichever frontend you're using locally:
 
-- Dashboard (Next.js): http://localhost:3000
-- Lightweight viewer (the one actually in use): http://localhost:8000/ui
+- Lightweight viewer (the one actually in use, matches the live `/ui`): http://localhost:8000/ui
+- Next.js dashboard (local dev only, not deployed): http://localhost:3000
 
 ## Notes
 
@@ -111,10 +114,8 @@ you're using:
   just one side.
 - To stop a server: find its PID with the `netstat` command in step 1, then
   `taskkill //PID <pid> //F` (Bash) or `Stop-Process -Id <pid> -Force`
-  (PowerShell). The sync task (above) will restart the API server on its own
-  the next time it finds new data, so don't worry about it staying down —
-  just don't be surprised if it comes back up without you doing anything.
-- If you ever want local collection back instead of GitHub Actions:
-  `Enable-ScheduledTask -TaskName "APIx Collection Cycle"` (and consider
-  disabling "APIx GitHub Sync" first, so the two don't fight over the same
-  tracked `airfare_observatory.db`).
+  (PowerShell).
+- The local uvicorn server holds a persistent connection to
+  `airfare_observatory.db` for as long as it runs. If you need git to update
+  that file (e.g. `git pull`, `git checkout`), stop the server first — a
+  live connection can block the filesystem write on Windows.

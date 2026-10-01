@@ -4,9 +4,17 @@
 [![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-2.0.0-009688.svg)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Tests](https://img.shields.io/badge/Tests-217%20Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-276%20Passing-brightgreen.svg)]()
 [![Methodology](https://img.shields.io/badge/Methodology-APIX--2.0-847dff.svg)]()
 [![Governance](https://img.shields.io/badge/Governance-Intelligence-FF6B35.svg)]()
+
+---
+
+## 🚀 Live Deployment
+
+- **API**: https://apix-observatory-api.vercel.app — FastAPI deployed as a Vercel Python serverless function, redeploying automatically on every push to `main`.
+- **Dashboard**: https://apix-observatory-api.vercel.app/ui/ — the lightweight single-file viewer, served directly by the same deployed API (the Next.js dashboard under `apps/dashboard` is local-dev-only and is not deployed anywhere).
+- **Database**: a shared Neon Postgres instance. `.github/workflows/collect.yml` runs real collection 4x daily (06:00/12:00/18:00/23:00 IST) on GitHub Actions and writes straight into this same database — the live site always reflects the latest scheduled collection with no manual step. See [RESTART.md](RESTART.md) for the local-dev setup and architecture notes.
 
 ---
 
@@ -73,7 +81,7 @@ python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000
 - API is accessible at: `http://localhost:8000`
 - Interactive OpenAPI Docs: `http://localhost:8000/docs`
 
-### 4. Frontend Dashboard Setup
+### 4. Frontend Dashboard Setup (local dev only — not deployed)
 ```bash
 cd apps/dashboard
 npm install
@@ -81,13 +89,14 @@ npm run build
 npm run start
 ```
 - Dashboard is accessible at: `http://localhost:3000`
+- This Next.js app is local-dev-only and isn't deployed anywhere. The actual dashboard in production use is the lightweight static UI served directly by the API at `/ui` (see "Live Deployment" above) — no Node required for that one.
 
 ---
 
 ## 🧪 Automated Testing & Verification
 
 ```bash
-# Run all 217 unit, statistical, and integration tests
+# Run all 276 unit, statistical, and integration tests
 pytest tests/ -q
 
 # Run live dual-feed collection runner
