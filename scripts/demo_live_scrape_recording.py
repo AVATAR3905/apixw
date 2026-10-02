@@ -47,7 +47,49 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 GREEN, CYAN, GREY, YELLOW, BOLD, RESET = "\033[92m", "\033[96m", "\033[90m", "\033[93m", "\033[1m", "\033[0m"
+MAGENTA = "\033[95m"
 _t0 = time.time()
+
+# Presentation script cues (Team Phoenix narration), shown at the moment in
+# the demo each line actually describes, so a presenter reading them aloud
+# during a recording stays in sync with what's happening on screen. Only the
+# lines about the scraper/OCR pipeline itself are here -- the intro ("Hi,
+# we're Team Phoenix...") and dashboard lines are said before this script
+# runs, and the closing line after it finishes.
+NARRATION = {
+    "scrape": (
+        "Here's how the data actually gets in. Every day, our system "
+        "automatically visits airline and travel websites and pulls live "
+        "ticket prices using browser automation -- no manual price-checking, "
+        "and no cooperation needed from the airlines."
+    ),
+    "ocr": (
+        "But websites change constantly, and they can block automated tools "
+        "outright. So we built a second, independent layer underneath the "
+        "scraper. If a scrape ever fails, the system doesn't just give up -- "
+        "it takes a screenshot of the live page and uses OCR combined with "
+        "an AI vision model, called PaddleOCR, to literally read the fare "
+        "off the screen, the same way a human eye would. That means even if "
+        "a site redesigns itself overnight or throws up a CAPTCHA, our "
+        "index keeps updating. We effectively have two independent paths to "
+        "the same number -- so the system never goes down."
+    ),
+    "weighting": (
+        "Every fare collected this way -- scraped directly, or read through "
+        "OCR -- gets cleaned and weighted using real DGCA passenger-traffic "
+        "data, so busier routes count more, exactly like a proper price "
+        "index should."
+    ),
+}
+
+
+def _narrate(key: str, narrate_enabled: bool):
+    if not narrate_enabled:
+        return
+    text = NARRATION[key]
+    print(f"\n{BOLD}{MAGENTA}--- SAY THIS ---{RESET}")
+    print(f"{MAGENTA}{text}{RESET}")
+    input(f"{GREY}[press Enter when ready to continue]{RESET}")
 
 
 def _log(stage: str, *lines: str):
@@ -91,6 +133,7 @@ async def _run_carrier_demo(args) -> dict:
         origin, dest, travel_date_str
     )
 
+    _narrate("scrape", args.narrate)
     _log(
         "1. LAUNCH BROWSER (visible)",
         f"Carrier:  {args.carrier} ({scraper._carrier_name(args.carrier)})",
@@ -173,6 +216,7 @@ async def _run_carrier_demo(args) -> dict:
                     else "Nothing found this way on this run.",
                 )
 
+                _narrate("ocr", args.narrate)
                 _log("5. OCR EXTRACTION (on the same real screenshot)", "Running PaddleOCR...")
                 cards = extract_cards_from_screenshot(
                     image_path=screenshot_path, reference_date=travel_date_str, allow_vlm=False
@@ -237,6 +281,7 @@ def _run_ota_demo(args) -> dict:
     dest_name = _EMT_CITY_NAMES.get(dest.upper())
     target_url = "https://www.easemytrip.com/"
 
+    _narrate("scrape", args.narrate)
     _log(
         "1. LAUNCH BROWSER (visible)",
         f"Source:   EaseMyTrip (OTA)",
@@ -303,6 +348,7 @@ def _run_ota_demo(args) -> dict:
                 else "Nothing found this way on this run.",
             )
 
+            _narrate("ocr", args.narrate)
             _log("7. OCR EXTRACTION (on the same real screenshot)", "Running PaddleOCR...")
             ocr_cards = extract_cards_from_screenshot(screenshot_path, travel_date_str)
             ocr_quotes = scraper._to_raw_quotes(
@@ -355,6 +401,10 @@ def main():
     parser.add_argument("--out-dir", default=os.path.expanduser("~/Downloads/APIx Live Scrape Demo"))
     parser.add_argument("--persist", action="store_true", help="Write structured results into the real database")
     parser.add_argument("--no-open", action="store_true", help="Don't auto-open results when done")
+    parser.add_argument(
+        "--no-narrate", dest="narrate", action="store_false", default=True,
+        help="Skip the presentation-script cues and Enter-to-continue pauses (just run straight through)",
+    )
     args = parser.parse_args()
 
     if args.source == "ota":
@@ -369,6 +419,7 @@ def main():
     _log("6. RESULTS")
     _print_quotes("Structured extraction (network-JSON/DOM)", result["structured_quotes"])
     _print_quotes("OCR extraction (screenshot)", result["ocr_quotes"])
+    _narrate("weighting", args.narrate)
 
     if args.persist and result["structured_quotes"] and args.source == "carrier":
         from database.session import SessionLocal
