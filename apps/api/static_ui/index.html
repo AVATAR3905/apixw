@@ -406,7 +406,7 @@
       const dates=[]; for(let i=0;i<12;i++){let d=new Date();d.setDate(d.getDate()-i);dates.push(d.toISOString().slice(0,10));}
       data={route,cells:dates.flatMap(d=>[1,7,15,30,45].map(a=>({observation_date:d,advance_purchase_days:a,median_fare_inr:3500+(45-a)*55+Math.random()*1100})))};
     }
-    const cells=data.cells||[], dates=[...new Set(cells.map(c=>c.observation_date))].sort(), apds=[...new Set(cells.map(c=>c.advance_purchase_days))].sort((a,b)=>a-b);
+    const cells=data.cells||[], dates=[...new Set(cells.map(c=>c.observation_date))].sort().reverse(), apds=[...new Set(cells.map(c=>c.advance_purchase_days))].sort((a,b)=>a-b);
     const vals=cells.map(c=>Number(c.median_fare_inr??c.avg_fare_inr??c.min_fare_inr)); const lo=Math.min(...vals),hi=Math.max(...vals),span=hi-lo||1;
     const map=new Map(cells.map(c=>[c.observation_date+'|'+c.advance_purchase_days,c]));
     let html='<table class="min-w-[780px] w-full"><thead><tr><th class="px-3 py-3 text-left text-[10px] uppercase tracking-[.12em] text-muted">Date</th>'+apds.map(a=>`<th class="px-3 py-3 text-center text-[10px] uppercase tracking-[.12em] text-muted">${a}d out</th>`).join('')+'</tr></thead><tbody>';
