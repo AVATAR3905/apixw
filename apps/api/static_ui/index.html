@@ -368,7 +368,7 @@
     // back to fakeSeries() every time -- this whole chart was fake data).
     // /index/dual-series is the real endpoint and returns headline+core
     // together in one call, so there's no separate Core fetch to fail either.
-    try { data=await api('/index/dual-series?'+params({frequency:$('#ovFrequency').value})); clearError(); }
+    try { data=await api('/api/v1/index/dual-series'); clearError(); }
     catch(e){
       data={rows:fakeSeries().points.map(p=>({date:p.index_date,headline:p.index_value,core:null}))};
       showError('API not connected. Showing a polished demo state -- check that the backend is reachable.');
