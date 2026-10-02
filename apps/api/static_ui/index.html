@@ -285,7 +285,15 @@
 <script>
   const $ = s => document.querySelector(s);
   const $$ = s => [...document.querySelectorAll(s)];
-  const API_BASE = localStorage.getItem('apix_api_base') || ''; // e.g. http://localhost:8000
+  // Always same-origin. Used to be overridable via a localStorage key written
+  // by a now-removed "Demo" mode-switch button -- left as a dead override,
+  // anyone who'd ever clicked that button would have a stale value stuck in
+  // their browser's localStorage forever, silently pointing every API call
+  // at an unreachable local port and breaking the whole page into fake-data
+  // fallbacks with no visible error. Clear any such leftover value so a
+  // browser that still has it heals itself on next load.
+  try { localStorage.removeItem('apix_api_base'); } catch (e) {}
+  const API_BASE = '';
   const charts = {};
   let routes = [];
   let farePage = 1;
@@ -349,7 +357,7 @@
 
   async function loadRoutes(){
     try { routes = await api('/routes'); clearError(); }
-    catch(e) { routes = mock.routes; showError('API not connected. Showing a polished demo state. Set localStorage.apix_api_base to your FastAPI origin to connect live data.'); }
+    catch(e) { routes = mock.routes; showError('API not connected. Showing a polished demo state -- check that the backend is reachable.'); }
     populateRoutes();
     $('#statRoutes').textContent = routes.length;
   }
@@ -361,7 +369,10 @@
     // /index/dual-series is the real endpoint and returns headline+core
     // together in one call, so there's no separate Core fetch to fail either.
     try { data=await api('/index/dual-series?'+params({frequency:$('#ovFrequency').value})); clearError(); }
-    catch(e){ data={rows:fakeSeries().points.map(p=>({date:p.index_date,headline:p.index_value,core:null}))}; }
+    catch(e){
+      data={rows:fakeSeries().points.map(p=>({date:p.index_date,headline:p.index_value,core:null}))};
+      showError('API not connected. Showing a polished demo state -- check that the backend is reachable.');
+    }
     const rows=data.rows||[];
     if(!rows.length) return;
     const last=rows[rows.length-1];
