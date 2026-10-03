@@ -1,0 +1,29 @@
+name: Keep API Warm
+
+# Pings the deployed API's /health endpoint every 5 minutes so Vercel keeps
+# a warm instance around, avoiding the 10-15s cold-start tail latency
+# confirmed by scripts/stress_test_live.py on a cold deployment. /health is
+# cheap to compute, but hitting it still forces the same Python cold start
+# as any other route (the whole app -- pandas/numpy/scipy/statsmodels/
+# scikit-learn/SQLAlchemy -- imports once per cold instance regardless of
+# which endpoint is requested first), so this keeps every endpoint warm,
+# not just /health itself. Also exempt from rate limiting, so this can't
+# interfere with real traffic's budget.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping /health
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 https://apix-observatory-api.vercel.app/health)
+          echo "status: $code"
+          if [ "$code" != "200" ]; then
+            echo "::warning::Health check returned $code"
+          fi
