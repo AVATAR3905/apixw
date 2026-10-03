@@ -200,6 +200,12 @@
             </div>
           </div>
           <div class="chart-box mt-5"><canvas id="overviewChart"></canvas></div>
+          <p class="mt-3 text-xs text-muted">
+            <b class="text-ink">Headline</b> is the index across every observed fare.
+            <b class="text-ink">Core</b> is the same calculation with festival/peak-demand
+            travel dates excluded, so it shows the underlying price trend without holiday
+            spikes. They often move together -- the gap between them is the festival effect.
+          </p>
         </div>
 
         <div class="glass rounded-[30px] p-6">
@@ -328,6 +334,30 @@
     return p.toString();
   }
   function money(v){ return v == null ? '—' : '₹' + Number(v).toLocaleString('en-IN',{maximumFractionDigits:0}); }
+  function bucketRows(rows, frequency){
+    if(frequency==='daily' || !rows.length) return rows;
+    const buckets = new Map();
+    for(const r of rows){
+      const d = new Date(r.date+'T00:00:00Z');
+      let key;
+      if(frequency==='weekly'){
+        const day = d.getUTCDay(), diff = (day===0?6:day-1);
+        const monday = new Date(d); monday.setUTCDate(d.getUTCDate()-diff);
+        key = monday.toISOString().slice(0,10);
+      } else {
+        key = r.date.slice(0,7)+'-01';
+      }
+      if(!buckets.has(key)) buckets.set(key, {headline:[], core:[]});
+      const b = buckets.get(key);
+      if(r.headline!=null) b.headline.push(Number(r.headline));
+      if(r.core!=null) b.core.push(Number(r.core));
+    }
+    const avg = arr => arr.length ? arr.reduce((a,c)=>a+c,0)/arr.length : null;
+    return [...buckets.keys()].sort().map(key=>{
+      const b = buckets.get(key);
+      return {date:key, headline:avg(b.headline), core:avg(b.core)};
+    });
+  }
   function table(el, headers, rows){
     el.innerHTML = '<thead><tr>' + headers.map(h=>`<th class="border-b border-black/10 bg-white/35 px-4 py-4 text-[10px] font-semibold uppercase tracking-[.12em] text-muted">${h}</th>`).join('') + '</tr></thead><tbody>' +
       rows.map(r=>'<tr>'+r.map(v=>`<td class="border-b border-black/5 px-4 py-4 text-sm">${v ?? ''}</td>`).join('')+'</tr>').join('')+'</tbody>';
@@ -373,15 +403,16 @@
       data={rows:fakeSeries().points.map(p=>({date:p.index_date,headline:p.index_value,core:null}))};
       showError('API not connected. Showing a polished demo state -- check that the backend is reachable.');
     }
-    const rows=data.rows||[];
-    if(!rows.length) return;
+    const dailyRows=data.rows||[];
+    if(!dailyRows.length) return;
+    const rows=bucketRows(dailyRows, $('#ovFrequency').value);
     const last=rows[rows.length-1];
     $('#statIndex').textContent=Number(last.headline).toFixed(1);
     $('#heroIndex').textContent=Number(last.headline).toFixed(1);
     $('#heroDate').textContent=last.date||'';
     $('#overviewHeadline').textContent=`Latest ${$('#ovFrequency').value} index · ${last.date}`;
     chart('overviewChart',rows.map(r=>r.date),[
-      ds('Headline index',rows.map(r=>Number(r.headline)),{backgroundColor:'rgba(183,110,61,.14)'}),
+      ds('Headline index',rows.map(r=>r.headline!=null?Number(r.headline):null),{backgroundColor:'rgba(183,110,61,.14)'}),
       ds('Core index',rows.map(r=>r.core!=null?Number(r.core):null),{borderColor:'#11110f',pointBackgroundColor:'#11110f',backgroundColor:'transparent',fill:false})
     ]);
     try {
