@@ -152,6 +152,10 @@ The **India Airfare Price Observatory** is an institutional econometric platform
 * Limiter is a fixed sliding window; breaches return **`429 Too Many Requests`** with a `Retry-After: 60` header.
 * Every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
 * Exempt: `/`, `/health`, `/docs/*`, `/redoc`, `/openapi.json`, and `/ui/*` viewer paths.
+* **Known gap**: the counter is in-memory per server instance, not shared across the deployed
+  platform's parallel instances -- it reliably blocks sequential abuse but is bypassable by
+  concurrent request bursts from the same client. A shared (e.g. database-backed) counter would
+  close this; not yet implemented.
 """,
     version="2.0.0",
     docs_url="/docs",

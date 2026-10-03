@@ -154,6 +154,13 @@ Being upfront about what is genuinely live vs. still a calibrated stand-in:
   list) and bot-challenge/CAPTCHA-page detection are wired into the live carrier-direct path.
   CAPTCHA *solving* and IP-rotation via proxies remain unwired — they need a paid 2Captcha-style
   key and a purchased proxy pool, which this environment doesn't have.
+- **Rate limiting works against sequential abuse, not concurrent bursts:** confirmed via
+  `scripts/stress_test_live.py` against the live deployment — 150 sequential requests to a
+  limited endpoint correctly started returning `429` at request #120, but 150 *concurrent*
+  requests to the same endpoint all returned `200`. The limiter's in-memory counter is
+  per-process; Vercel's deployment spreads concurrent bursts across multiple parallel instances,
+  each with its own independent counter that never individually crosses the limit. A shared
+  (e.g. database-backed) counter would close this; not yet implemented.
 - **DGCA route weights** (`data/reference/dgca_traffic.csv`) are now real trailing-12-month
   (Aug 2025–Jul 2026) city-pair passenger volumes sourced from DGCA's own Monthly Domestic Air
   Transport Statistics (via the public [Vonter/india-aviation-traffic](https://github.com/Vonter/india-aviation-traffic)

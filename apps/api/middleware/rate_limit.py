@@ -15,6 +15,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Export paths (/export/*) receive their own, independent 20 req/min budget
     -- separate from the general-traffic budget, so neither class can starve
     the other for the same client.
+
+    KNOWN LIMITATION (confirmed via scripts/stress_test_live.py): this state
+    is per-process, not shared across instances. On the Vercel deployment,
+    Fluid Compute spins up multiple separate warm instances to serve
+    concurrent bursts, each with its own independent client_records dict --
+    so a client sending requests *concurrently* rather than sequentially
+    accumulates no single instance's count past the limit and is never
+    blocked (verified: 150 concurrent requests to one endpoint, zero 429s,
+    vs. the same endpoint correctly blocking at request #120 under
+    sequential load, where Vercel happened to keep routing to one warm
+    instance). Sequential/naive abuse is still blocked correctly. A real
+    fix needs a shared store (e.g. a Postgres-backed counter) instead of
+    this in-memory dict; left as-is for now since this is a prototype-stage
+    project, not something facing real abuse at scale yet.
     """
 
     def __init__(self, app, requests_per_minute: int = 120):
