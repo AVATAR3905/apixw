@@ -405,12 +405,22 @@
     }
     const dailyRows=data.rows||[];
     if(!dailyRows.length) return;
-    const rows=bucketRows(dailyRows, $('#ovFrequency').value);
-    const last=rows[rows.length-1];
-    $('#statIndex').textContent=Number(last.headline).toFixed(1);
-    $('#heroIndex').textContent=Number(last.headline).toFixed(1);
-    $('#heroDate').textContent=last.date||'';
-    $('#overviewHeadline').textContent=`Latest ${$('#ovFrequency').value} index · ${last.date}`;
+    // Hero stat always reflects the true latest real day, regardless of the
+    // chart's frequency selection -- a monthly/weekly bucket average is for
+    // the chart, not for "latest national index", which should never show
+    // an averaged value under a bucket-start date that isn't today's data.
+    const latestDaily=dailyRows[dailyRows.length-1];
+    $('#statIndex').textContent=Number(latestDaily.headline).toFixed(1);
+    $('#heroIndex').textContent=Number(latestDaily.headline).toFixed(1);
+    $('#heroDate').textContent=latestDaily.date||'';
+
+    const freq=$('#ovFrequency').value;
+    // Daily view: last 30 days only, not the full history back to the base
+    // period -- the early flat/sparse days make the recent trend hard to
+    // read. Weekly/monthly are already compressed, so they keep full history.
+    const windowRows = freq==='daily' ? dailyRows.slice(-30) : dailyRows;
+    const rows=bucketRows(windowRows, freq);
+    $('#overviewHeadline').textContent=`Latest ${freq} index · ${latestDaily.date}`;
     chart('overviewChart',rows.map(r=>r.date),[
       ds('Headline index',rows.map(r=>r.headline!=null?Number(r.headline):null),{backgroundColor:'rgba(183,110,61,.14)'}),
       ds('Core index',rows.map(r=>r.core!=null?Number(r.core):null),{borderColor:'#11110f',pointBackgroundColor:'#11110f',backgroundColor:'transparent',fill:false})
