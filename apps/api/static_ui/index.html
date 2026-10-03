@@ -415,10 +415,17 @@
     $('#heroDate').textContent=latestDaily.date||'';
 
     const freq=$('#ovFrequency').value;
-    // Daily view: last 30 days only, not the full history back to the base
-    // period -- the early flat/sparse days make the recent trend hard to
-    // read. Weekly/monthly are already compressed, so they keep full history.
-    const windowRows = freq==='daily' ? dailyRows.slice(-30) : dailyRows;
+    // Daily view: last 30 *calendar* days, not the full history back to the
+    // base period. Filtered by actual date rather than row count -- some
+    // days have no computed index value, so the last 30 rows can reach back
+    // much further than 30 days. Weekly/monthly keep full history since
+    // they're already compressed.
+    let windowRows = dailyRows;
+    if(freq==='daily'){
+      const cutoff = new Date(latestDaily.date+'T00:00:00Z'); cutoff.setUTCDate(cutoff.getUTCDate()-29);
+      const cutoffStr = cutoff.toISOString().slice(0,10);
+      windowRows = dailyRows.filter(r=>r.date>=cutoffStr);
+    }
     const rows=bucketRows(windowRows, freq);
     $('#overviewHeadline').textContent=`Latest ${freq} index · ${latestDaily.date}`;
     chart('overviewChart',rows.map(r=>r.date),[
