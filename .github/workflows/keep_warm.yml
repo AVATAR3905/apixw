@@ -1,14 +1,30 @@
 name: Keep API Warm
 
-# Pings the deployed API's /health endpoint every 5 minutes so Vercel keeps
-# a warm instance around, avoiding the 10-15s cold-start tail latency
-# confirmed by scripts/stress_test_live.py on a cold deployment. /health is
-# cheap to compute, but hitting it still forces the same Python cold start
-# as any other route (the whole app -- pandas/numpy/scipy/statsmodels/
-# scikit-learn/SQLAlchemy -- imports once per cold instance regardless of
-# which endpoint is requested first), so this keeps every endpoint warm,
-# not just /health itself. Also exempt from rate limiting, so this can't
-# interfere with real traffic's budget.
+# Pings the deployed API's /health endpoint on a "*/5 * * * *" schedule --
+# but GitHub does NOT actually honor that interval in practice: confirmed
+# from this workflow's own run history that it really fires roughly every
+# 6-7 hours, same as the unrelated collect.yml schedule, not every 5
+# minutes. GitHub documents that scheduled workflows run best-effort and
+# can be delayed or dropped under platform load, and silently drops the
+# vast majority of a high-frequency schedule like this one, especially on
+# a public repo. Tried Vercel's own Cron Jobs as an alternative -- rejected
+# outright at deploy time ("Hobby accounts are limited to daily cron
+# jobs"), so that's not an option on the free tier either.
+#
+# Net effect: this still provides occasional best-effort warming (better
+# than nothing), but does NOT reliably prevent the 10-15s cold-start tail
+# latency confirmed by scripts/stress_test_live.py. Decided not to chase
+# this further for now (options left: a local Task Scheduler ping, a
+# third-party uptime monitor, or Vercel Pro) -- the practical mitigation
+# is to hit /health manually a minute or two before anyone's actually
+# about to look at the live site (e.g. before a demo).
+#
+# /health is exempt from rate limiting and cheap to compute, but hitting
+# it still forces the same Python cold start as any other route (the
+# whole app -- pandas/numpy/scipy/statsmodels/scikit-learn/SQLAlchemy --
+# imports once per cold instance regardless of which endpoint is
+# requested first), so on the occasions this does fire, it warms every
+# endpoint, not just /health itself.
 
 on:
   schedule:

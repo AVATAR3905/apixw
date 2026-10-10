@@ -154,6 +154,13 @@ Being upfront about what is genuinely live vs. still a calibrated stand-in:
   list) and bot-challenge/CAPTCHA-page detection are wired into the live carrier-direct path.
   CAPTCHA *solving* and IP-rotation via proxies remain unwired — they need a paid 2Captcha-style
   key and a purchased proxy pool, which this environment doesn't have.
+- **Cold starts on the live deployment aren't reliably mitigated:** the first request after
+  idle costs 10-15s (confirmed via `scripts/stress_test_live.py`). Tried pinging `/health` every
+  5 minutes to keep an instance warm -- neither option on the free tier actually delivers that:
+  Vercel's own Cron Jobs reject any sub-daily schedule outright on the Hobby plan, and GitHub
+  Actions' `*/5 * * * *` schedule is only honored best-effort and in practice fires roughly every
+  6-7 hours (confirmed from `keep_warm.yml`'s own run history), not every 5 minutes. Practical
+  mitigation: hit `/health` manually a minute or two before a demo.
 - **Rate limiting works against sequential abuse, not concurrent bursts:** confirmed via
   `scripts/stress_test_live.py` against the live deployment — 150 sequential requests to a
   limited endpoint correctly started returning `429` at request #120, but 150 *concurrent*
