@@ -6,26 +6,31 @@ name: Collect Real Airfare Data
 # unlimited/free; none of the sources this script hits need an API key, but
 # a DATABASE_URL repo secret (the shared Neon Postgres) is required.
 #
-# Runs HOURLY rather than at 4 fixed times, deliberately. The original
-# design used 4 explicit crons at :30 past specific hours -- but :00 and
-# :30 are the two most congested slots on GitHub's shared cron dispatcher
-# (most scheduled workflows across every GitHub repo land on one of those
-# two), and GitHub documents scheduled runs as best-effort: "can be delayed
-# during periods of high loads... in the worst case, the workflow may not
-# run." Confirmed in practice, not hypothetically: the 2026-10-11 06:00 IST
-# slot never fired at all (next run found 6.5+ hours later, no trace of the
-# missed one -- not a slow run, a dropped one), required a manual
-# workflow_dispatch to recover same-day data.
+# The original design used 4 explicit crons at :30 past specific hours --
+# but :00 and :30 are the two most congested slots on GitHub's shared cron
+# dispatcher (most scheduled workflows across every GitHub repo land on one
+# of those two), and GitHub documents scheduled runs as best-effort: "can be
+# delayed during periods of high loads... in the worst case, the workflow
+# may not run." Confirmed in practice: the 2026-10-11 06:00 IST slot never
+# fired at all (required a manual workflow_dispatch to recover same-day
+# data).
 #
-# Fix: trigger hourly at :07 (clear of both congested slots) instead of 4x
-# at :30. trigger_collection_cycle's own dedup (services/scheduler/
-# collection_scheduler.py) already treats "already collected within the
-# last ~5.5h" as done and skips straight back out -- cheap, no real
-# scraping -- so this doesn't turn into 24 real collections/day, it stays
-# ~4/day. What changes is resilience: a single real collection window now
-# has ~5-6 separate hourly chances to fire, not one -- GitHub would have to
-# drop nearly all of them in the same window for a gap to recur, versus
-# previously needing to drop exactly one specific cron to cause one.
+# First attempt at a fix tried hourly triggers (24x/day) for redundancy --
+# that was wrong and made things worse, not better: it moved this workflow
+# into the same "high-frequency schedule" territory that keep_warm.yml (see
+# that workflow's own postmortem comment) had already proven GitHub throttles
+# far more aggressively than a low-frequency one -- confirmed by watching it:
+# 11.5 hours, zero firings, not a slow run but a near-total drop streak. The
+# *original* problem was landing on the congested :30 minute at low (4x/day)
+# frequency, which was otherwise reliable; swapping to high frequency solved
+# nothing and introduced the worse, already-known failure mode.
+#
+# Actual fix: stay low-frequency (now 8x/day, not 24x) but move off the
+# congested minute, and add one offset backup per target window instead of
+# relying on exactly one trigger. Each pair is ~3h apart; trigger_collection_
+# cycle's own dedup (services/scheduler/collection_scheduler.py, ~5.5h
+# freshness window) means the backup is a cheap no-op skip if the primary
+# already succeeded, and a real recovery if it didn't.
 #
 # Writes straight into the shared Neon Postgres DB (via the DATABASE_URL
 # repo secret) that the deployed Vercel API also reads from -- the same DB
@@ -43,7 +48,17 @@ name: Collect Real Airfare Data
 
 on:
   schedule:
-    - cron: "7 * * * *"
+    # Primary targets (IST 06:00/12:00/18:00/23:00, minute shifted off :30):
+    - cron: "7 0 * * *"
+    - cron: "7 6 * * *"
+    - cron: "7 12 * * *"
+    - cron: "7 17 * * *"
+    # Backups, ~3h after each primary, same window (dedup skips if the
+    # primary already succeeded):
+    - cron: "7 3 * * *"
+    - cron: "7 9 * * *"
+    - cron: "7 15 * * *"
+    - cron: "7 20 * * *"
   workflow_dispatch: {}
 
 jobs:

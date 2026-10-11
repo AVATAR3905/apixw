@@ -25,15 +25,17 @@ The real, production-facing stack runs independently of this machine:
 
 **Real-data collection runs on GitHub Actions, writing straight into the
 shared Postgres above** — not into a file that gets committed back to git.
-`.github/workflows/collect.yml` checks in *hourly* on GitHub's own
-infrastructure (not 4 fixed times — GitHub's scheduled-workflow dispatcher
-is best-effort and silently dropped one of the old 4 fixed crons on
-2026-10-11, causing a real gap; see the workflow file's own comment for the
-full story), completely independent of whether this machine is even on. A
-~5.5h freshness window in the scheduler means most of those hourly
-check-ins just confirm nothing's due yet and exit immediately — only
-roughly 4 of them per day actually turn into a real collection. Check its
-history any time:
+`.github/workflows/collect.yml` checks in 8x/day on GitHub's own
+infrastructure (2 per ~6h target window instead of the original 1 —
+GitHub's scheduled-workflow dispatcher is best-effort and silently dropped
+one of the old 4 fixed crons on 2026-10-11, causing a real gap; see the
+workflow file's own comment for the full story, including a first attempt
+at hourly/24x triggers that made things worse by moving into a frequency
+GitHub throttles even harder), completely independent of whether this
+machine is even on. A ~5.5h freshness window in the scheduler means the
+backup check-in in each pair is usually a cheap no-op (primary already
+succeeded) — only roughly 4 of the 8 daily triggers actually turn into a
+real collection. Check its history any time:
 
 ```bash
 gh run list --repo AVATAR3905/apixw --workflow="Collect Real Airfare Data"
