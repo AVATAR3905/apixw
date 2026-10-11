@@ -87,16 +87,22 @@ class CollectionScheduler:
         )
         db.commit()
 
-        # Freshness window, not "any time today": the 4x-daily schedule
-        # (~05-07h apart) is meant to capture 4 separate real intra-day price
-        # snapshots, not 1 real collection plus 3 no-op reruns. Dedup only
-        # against completions from the last few hours -- long enough to
-        # still cover the crash-resume case this check exists for (an
-        # unhandled Node/Playwright crash mid-run; the workflow's own
-        # timeout-minutes caps a single run at 3h), short enough that the
-        # *next* scheduled run always finds the previous one's jobs stale
-        # and genuinely re-collects rather than skipping all 50 again.
-        freshness_cutoff = utcnow() - datetime.timedelta(hours=4)
+        # Freshness window, not "any time today": the collection workflow is
+        # meant to capture ~4 separate real intra-day price snapshots, not 1
+        # real collection plus a pile of no-op reruns. collect.yml now
+        # triggers *hourly* (not 4x/day at fixed times) specifically so a
+        # dropped/delayed GitHub cron firing isn't a single point of failure
+        # -- a ~6h collection window gets ~5-6 separate hourly chances to
+        # fire instead of one. This window is what turns those hourly
+        # check-ins back into ~4 real collections/day rather than 24: long
+        # enough to still cover the crash-resume case this check exists for
+        # (an unhandled Node/Playwright crash mid-run; the workflow's own
+        # timeout-minutes caps a single run at 3h) and to comfortably outlast
+        # the ~1h gap between consecutive hourly trigger attempts, short
+        # enough (< the ~6h real-world gap between collection windows) that
+        # the window reliably re-opens and the next due hourly check-in finds
+        # the previous jobs stale and genuinely re-collects.
+        freshness_cutoff = utcnow() - datetime.timedelta(hours=5, minutes=30)
         completed_today = {
             (row.route_id, row.advance_days)
             for row in db.query(CollectionJob.route_id, CollectionJob.advance_days).filter(

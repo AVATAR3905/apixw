@@ -14,7 +14,7 @@
 
 - **API**: https://apix-observatory-api.vercel.app — FastAPI deployed as a Vercel Python serverless function, redeploying automatically on every push to `main`.
 - **Dashboard**: https://apix-observatory-api.vercel.app/ui/ — the lightweight single-file viewer, served directly by the same deployed API (the Next.js dashboard under `apps/dashboard` is local-dev-only and is not deployed anywhere).
-- **Database**: a shared Neon Postgres instance. `.github/workflows/collect.yml` runs real collection 4x daily (06:00/12:00/18:00/23:00 IST) on GitHub Actions and writes straight into this same database — the live site always reflects the latest scheduled collection with no manual step. See [RESTART.md](RESTART.md) for the local-dev setup and architecture notes.
+- **Database**: a shared Neon Postgres instance. `.github/workflows/collect.yml` runs real collection on GitHub Actions and writes straight into this same database — the live site always reflects the latest collection with no manual step. Triggers *hourly* rather than at 4 fixed times (GitHub's scheduled-workflow dispatcher is best-effort and silently dropped one of the old 4 fixed crons on 2026-10-11 — see the workflow file's own comment); a ~5.5h dedup window in the scheduler keeps this at ~4 real collections/day despite the more frequent check-ins, now with ~5-6 chances per window instead of 1. See [RESTART.md](RESTART.md) for the local-dev setup and architecture notes.
 
 ---
 
