@@ -25,28 +25,46 @@ The real, production-facing stack runs independently of this machine:
 
 **Real-data collection runs on GitHub Actions, writing straight into the
 shared Postgres above** — not into a file that gets committed back to git.
-8 small `.github/workflows/collect_trigger_*.yml` files check in 8x/day on
-GitHub's own infrastructure (2 per ~6h target window instead of the
-original 1), each calling the shared `_collect_core.yml` reusable workflow
-for the actual job. Deliberately split into 8 separate files, each with
-exactly one `cron:` entry — GitHub has a documented bug where multiple
-`cron:` entries *in one workflow's schedule list* can silently collide and
-stop the whole workflow firing, with no warning, until the next hour. That
-bug is what actually caused a real gap on 2026-10-12 (3 consecutive missed
-slots in the old single-file 8-cron version, while an unrelated single-cron
-workflow fired fine in the same window — see `_collect_core.yml`'s own
-comment for the full story, including an earlier, wrong attempt at hourly
-triggers that made things worse). A ~5.5h freshness window in the
-scheduler means the backup check-in in each pair is usually a cheap no-op
-(primary already succeeded) — only roughly 4 of the 8 daily triggers
-actually turn into a real collection. Check all 8 triggers' recent history
-at once (each `collect_trigger_*.yml` run's job steps are the real
-collection logic, pulled in from `_collect_core.yml` via `workflow_call`):
+The actual job lives in `.github/workflows/_collect_core.yml`, a reusable
+workflow (`workflow_call` + `workflow_dispatch`).
+
+**The reliable trigger is external, not GitHub's own `schedule:` cron.**
+History of why: the original single-file, 8-cron-entry `collect.yml` went
+silent for 3 consecutive slots on 2026-10-12 — a documented GitHub bug
+where multiple `cron:` entries *in one workflow's schedule list* can
+silently collide and stop the whole workflow firing. That was fixed by
+splitting into 8 single-cron `collect_trigger_*.yml` files
+(commit `4a36376`). But the *new* single-cron files then ALSO missed their
+first two scheduled slots — and the long-standing, always-single-cron
+`keep_warm.yml` (`*/5 * * * *`, meant to fire every 5 min) was independently
+confirmed firing only every 6+ hours. That rules out multi-cron-collision
+as the whole story: GitHub's `schedule:` trigger is just best-effort and
+not trustworthy for a 4x/day cadence here, full stop — no further cron
+shuffling fixes it.
+
+**Fix**: a free cron-job.org account calls GitHub's REST API directly,
+4x/day, with a scoped PAT:
+
+```
+POST https://api.github.com/repos/AVATAR3905/apixw/actions/workflows/381804634/dispatches
+Headers: Authorization: Bearer <PAT>, Accept: application/vnd.github+json,
+         X-GitHub-Api-Version: 2022-11-28, Content-Type: application/json
+Body:    {"ref":"main"}
+```
+
+381804634 is `_collect_core.yml`'s workflow ID (confirm with
+`gh api repos/AVATAR3905/apixw/actions/workflows --jq '.workflows[] | select(.path|test("_collect_core"))'`
+if it's ever recreated). This decouples the actual trigger timing from
+GitHub's internal scheduler entirely.
+
+The 8 `collect_trigger_*.yml` files are left in place as a free, harmless
+redundant backup — the scheduler's dedup window makes them a no-op if the
+external trigger already collected — but they are **not** the primary
+mechanism anymore. Check everything's recent history at once:
 
 ```bash
-for f in 00 03 06 09 12 15 17 20; do
-  gh run list --repo AVATAR3905/apixw --workflow="collect_trigger_$f.yml" --limit 2
-done
+gh api "repos/AVATAR3905/apixw/actions/runs?per_page=50" --jq \
+  '.workflow_runs[] | "\(.created_at) \(.name) \(.status) \(.conclusion) \(.event)"' | sort
 ```
 
 **The local "APIx Collection Cycle" scheduled task is disabled** (not
