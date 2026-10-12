@@ -1,0 +1,15 @@
+name: Collect Trigger 20:07 UTC
+
+# Deliberately one single cron entry per file -- see _collect_core.yml for
+# why (GitHub's documented multi-cron-collision bug). This is the backup
+# trigger for the ~23:00 IST window (~3h after the 17:07 primary); a cheap
+# no-op skip if that one already succeeded.
+
+on:
+  schedule:
+    - cron: "7 20 * * *"
+
+jobs:
+  call:
+    uses: ./.github/workflows/_collect_core.yml
+    secrets: inherit

@@ -25,20 +25,28 @@ The real, production-facing stack runs independently of this machine:
 
 **Real-data collection runs on GitHub Actions, writing straight into the
 shared Postgres above** — not into a file that gets committed back to git.
-`.github/workflows/collect.yml` checks in 8x/day on GitHub's own
-infrastructure (2 per ~6h target window instead of the original 1 —
-GitHub's scheduled-workflow dispatcher is best-effort and silently dropped
-one of the old 4 fixed crons on 2026-10-11, causing a real gap; see the
-workflow file's own comment for the full story, including a first attempt
-at hourly/24x triggers that made things worse by moving into a frequency
-GitHub throttles even harder), completely independent of whether this
-machine is even on. A ~5.5h freshness window in the scheduler means the
-backup check-in in each pair is usually a cheap no-op (primary already
-succeeded) — only roughly 4 of the 8 daily triggers actually turn into a
-real collection. Check its history any time:
+8 small `.github/workflows/collect_trigger_*.yml` files check in 8x/day on
+GitHub's own infrastructure (2 per ~6h target window instead of the
+original 1), each calling the shared `_collect_core.yml` reusable workflow
+for the actual job. Deliberately split into 8 separate files, each with
+exactly one `cron:` entry — GitHub has a documented bug where multiple
+`cron:` entries *in one workflow's schedule list* can silently collide and
+stop the whole workflow firing, with no warning, until the next hour. That
+bug is what actually caused a real gap on 2026-10-12 (3 consecutive missed
+slots in the old single-file 8-cron version, while an unrelated single-cron
+workflow fired fine in the same window — see `_collect_core.yml`'s own
+comment for the full story, including an earlier, wrong attempt at hourly
+triggers that made things worse). A ~5.5h freshness window in the
+scheduler means the backup check-in in each pair is usually a cheap no-op
+(primary already succeeded) — only roughly 4 of the 8 daily triggers
+actually turn into a real collection. Check all 8 triggers' recent history
+at once (each `collect_trigger_*.yml` run's job steps are the real
+collection logic, pulled in from `_collect_core.yml` via `workflow_call`):
 
 ```bash
-gh run list --repo AVATAR3905/apixw --workflow="Collect Real Airfare Data"
+for f in 00 03 06 09 12 15 17 20; do
+  gh run list --repo AVATAR3905/apixw --workflow="collect_trigger_$f.yml" --limit 2
+done
 ```
 
 **The local "APIx Collection Cycle" scheduled task is disabled** (not

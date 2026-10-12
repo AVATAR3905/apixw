@@ -1,0 +1,14 @@
+name: Collect Trigger 06:07 UTC
+
+# Deliberately one single cron entry per file -- see _collect_core.yml for
+# why (GitHub's documented multi-cron-collision bug). This is the primary
+# trigger for the ~12:00 IST window.
+
+on:
+  schedule:
+    - cron: "7 6 * * *"
+
+jobs:
+  call:
+    uses: ./.github/workflows/_collect_core.yml
+    secrets: inherit

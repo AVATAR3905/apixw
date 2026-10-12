@@ -1,0 +1,60 @@
+name: Collect Core (reusable)
+
+# The actual collection job, factored out of collect.yml into a reusable
+# workflow (workflow_call) so each cron trigger can live in its own
+# single-cron file. GitHub documents a real bug with multiple `cron:`
+# entries in one workflow's schedule list: "schedule collisions can cause
+# workflow failures, with no warning... the workflow will not run... will
+# resume running again at the next hour" (confirmed in practice here: all
+# 8 entries in the old collect.yml went silent for 3 consecutive slots,
+# 00:07/03:07/06:07 UTC on 2026-10-12, while the unrelated single-cron
+# keep_warm.yml fired fine in the same window -- ruling out a platform-wide
+# outage and pointing at multi-cron-in-one-file specifically). See the
+# collect_*.yml trigger files for the actual schedule.
+#
+# Real-data collection: 10 routes x 5 horizons (T+1/7/15/30/45), across
+# SpiceJet, Akasa, Google Flights RPC, Ixigo, EaseMyTrip. Writes straight
+# into the shared Neon Postgres DB (via the DATABASE_URL repo secret) that
+# the deployed Vercel API also reads from -- the same DB the dashboard
+# shows live, no separate sync/ingest step. The local SQLite file
+# (airfare_observatory.db) is no longer updated or committed by this
+# workflow; it stays purely a local-dev fallback (see database/session.py).
+#
+# Known real tradeoff, not a hypothetical: GitHub's runners are datacenter
+# IPs, the same class of address IndiGo is already confirmed to block on IP
+# reputation alone. This can degrade or newly block sources that work fine
+# from a home connection (SpiceJet/Akasa/Ixigo/EaseMyTrip) -- watch the
+# jobs_success/jobs_failed split (search this workflow's logs for
+# "FULL-BASKET COLLECTION COMPLETE") before relying on this as the primary
+# collection path.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    concurrency:
+      group: apix-collection
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run full-basket real-data collection
+        run: python scripts/collect_full_real_coverage.py
+        env:
+          SCRAPE_MODE: live
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
