@@ -32,9 +32,15 @@ PROJECT_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 sys.path.insert(0, PROJECT_ROOT)
 os.chdir(PROJECT_ROOT)  # so database/session.py's relative sqlite path resolves correctly
 
-from database.session import SessionLocal
-from packages.schemas.models import Airline, FareObservation, RawPayload, Route, Source
-from packages.statistics.quality import QualityEngine
+from database.session import SessionLocal  # noqa: E402
+from packages.schemas.models import (  # noqa: E402
+    Airline,
+    FareObservation,
+    RawPayload,
+    Route,
+    Source,
+)
+from packages.statistics.quality import QualityEngine  # noqa: E402
 
 IMPORT_SOURCE_COMMIT = "AyushyaRanjan/APIx@main (final commit, 2026-09-29)"
 COLLECTOR_VERSION = "EXTERNAL_IMPORT:AyushyaRanjan-APIx"

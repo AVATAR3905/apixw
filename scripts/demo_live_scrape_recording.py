@@ -284,7 +284,7 @@ def _run_ota_demo(args) -> dict:
     _narrate("scrape", args.narrate)
     _log(
         "1. LAUNCH BROWSER (visible)",
-        f"Source:   EaseMyTrip (OTA)",
+        "Source:   EaseMyTrip (OTA)",
         f"Route:    {origin} -> {dest}",
         f"Travel date: {travel_date_str} (T+{args.advance_days})",
         f"Target URL: {target_url}",
